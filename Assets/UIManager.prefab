@@ -1,0 +1,85 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &8131294040187200322
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 4418116202807826897}
+  - component: {fileID: 1003564327462896508}
+  m_Layer: 0
+  m_Name: UIManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &4418116202807826897
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8131294040187200322}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -61.698, y: -74.205, z: -36.136}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1003564327462896508
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8131294040187200322}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c6ebd206bdd8f2e4d91a338b1a2361bb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PendulumUI
+  pendulum: {fileID: 0}
+  sliderTheta: {fileID: 0}
+  sliderPhi: {fileID: 0}
+  sliderPhiVel: {fileID: 0}
+  sliderLength: {fileID: 0}
+  sliderStiffness: {fileID: 0}
+  sliderGravity: {fileID: 0}
+  sliderDamping: {fileID: 0}
+  sliderAirDrag: {fileID: 0}
+  sliderHumidity: {fileID: 0}
+  sliderMass: {fileID: 0}
+  sliderSwings: {fileID: 0}
+  sliderWindX: {fileID: 0}
+  sliderWindZ: {fileID: 0}
+  labelTheta: {fileID: 0}
+  labelPhi: {fileID: 0}
+  labelPhiVel: {fileID: 0}
+  labelLength: {fileID: 0}
+  labelStiffness: {fileID: 0}
+  labelGravity: {fileID: 0}
+  labelDamping: {fileID: 0}
+  labelAirDrag: {fileID: 0}
+  labelHumidity: {fileID: 0}
+  labelMass: {fileID: 0}
+  labelSwings: {fileID: 0}
+  labelWindX: {fileID: 0}
+  labelWindZ: {fileID: 0}
+  btnStart: {fileID: 0}
+  btnReset: {fileID: 0}
+  btnPause: {fileID: 0}
+  statusEnergy: {fileID: 0}
+  statusDrift: {fileID: 0}
+  statusSwings: {fileID: 0}
+  statusGeff: {fileID: 0}
+  statusVelocity: {fileID: 0}
+  statusRunning: {fileID: 0}
+  statusStopReason: {fileID: 0}
+  panelControls: {fileID: 0}
+  btnToggleUI: {fileID: 0}
