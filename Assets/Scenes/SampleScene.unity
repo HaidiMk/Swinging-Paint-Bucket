@@ -652,7 +652,7 @@ MonoBehaviour:
   enableRopeTwist: 0
   ropeTwistStiffness: 8
   ropeTwistDamping: 1
-  thetaDeg: 60
+  thetaDeg: 45
   phiDeg: 60
   thetaVel0: 0.9
   phiVel0: 0.9
@@ -669,6 +669,9 @@ MonoBehaviour:
   floorY: -2
   bounce: 0.3
   timeScale: 1
+  fadeOutDuration: 3
+  fadeOutStarted: 0
+  fadeOutTimer: 0
   enableCameraFollow: 0
   mainCamera: {fileID: 330585545}
   cameraOffset: {x: 0, y: 1.5, z: -3}

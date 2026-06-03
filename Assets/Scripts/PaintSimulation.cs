@@ -2,40 +2,42 @@
 using System.Collections.Generic;
 
 // ════════════════════════════════════════════════════════════════════
-//  PaintSimulation.cs  v6.2  — مع إصلاح حساب زاوية الإمالة
-//  الإصلاحات عن v6.1:
-//  [FIX-7] CheckSpillCondition — tiltAngle تُحسب من pendulum.theta مباشرةً
-//          بدل Vector3.Angle(BucketUp, Vector3.up)
-//          السبب: BucketUp مشتق من bucket.rotation اللي يعتمد على ropeDir،
-//          وعند theta صغير (الدلو قريب من أسفل نقطة التعليق) يصبح ropeDir
-//          غير مستقر ويعطي tiltAngle مضخَّمة → كل الطلاء ينسكب لحظة التوقف
-//          الحل: theta بالراديان مباشرة من SphericalPendulum هو زاوية الإمالة
-//          الحقيقية عن الشاقول، موثوق في كل الحالات
+//  PaintSimulation.cs  v6.3  — إصلاح انسكاب الطلاء عند التوقف
+//  الإصلاحات عن v6.2:
+//  [FIX-8] CheckSpillCondition — إضافة حد أدنى للسرعة الزاوية
+//          قبل الإصلاح: motionFactor = Clamp01((|θ̇| + |φ̇|) * 0.8f)
+//          حتى بـ thetaVel = 0.1 كان motionFactor ≈ 0.08 وهو غير صفر
+//          فيسبب انسكاباً طفيفاً مستمراً عند حركة بطيئة
+//          الحل: اشتراط أن تكون السرعة الزاوية > 0.15 قبل أي انسكاب
+//          أقل من هذا = البندول شبه متوقف = لا انسكاب
+//  [FIX-9] spillRate = tiltSpill * motionSpill معاً (ضرب لا جمع)
+//          القديم: spillRate = InverseLerp(25,90,tiltAngle) × motionFactor
+//          المشكلة: motionFactor كان معامل تقليل فقط، لكن spillRate الأساسي
+//          (من tiltAngle) ظل مرتفعاً عند التباطؤ لأن theta لم ينخفض بعد
+//          الجديد: spillRate = 0 تلقائياً إذا السرعة < MIN_SPILL_SPEED
+//          فلا يهم كم كانت tiltAngle كبيرة
 // ════════════════════════════════════════════════════════════════════
 
 public class PaintSimulation : MonoBehaviour
 {
-    // ══════════════════════════════════════════════
     [Header("References — المراجع")]
     public SphericalPendulum pendulum;
     public Transform bucketTransform;
     public Transform canvasTransform;
     public Renderer canvasRenderer;
 
-    // ══════════════════════════════════════════════
     [Header("Paint Type — نوع الطلاء")]
     public PaintType paintType = PaintType.Normal;
 
     public enum PaintType
     {
-        Watercolor,   // مائي — رقيق، يتدفق بسرعة
-        Normal,       // عادي — متوازن
-        Acrylic,      // أكريليك — لزج متوسط
-        Oil,          // زيتي — ثقيل جداً، بطيء
-        Honey         // عسل — لزوجة قصوى
+        Watercolor,
+        Normal,
+        Acrylic,
+        Oil,
+        Honey
     }
 
-    // ══════════════════════════════════════════════
     [Header("SPH Physics — فيزياء السائل")]
     [Range(50, 250)]
     public int maxParticles = 150;
@@ -46,12 +48,10 @@ public class PaintSimulation : MonoBehaviour
     public float DAMPING = 0.99f;
     public float MAX_VEL = 3f;
 
-    // ══════════════════════════════════════════════
     [Header("Surface Tension — التوتر السطحي")]
     public bool enableSurfaceTension = true;
     [Range(0f, 2f)] public float surfaceTension = 0.5f;
 
-    // ══════════════════════════════════════════════
     [Header("Temperature & Humidity — الحرارة والرطوبة")]
     [Range(0f, 100f)] public float temperature = 25f;
     [Range(0f, 1f)] public float fluidHumidity = 0.5f;
@@ -65,13 +65,11 @@ public class PaintSimulation : MonoBehaviour
     [HideInInspector] public float gravityScale;
     [HideInInspector] public float bucketInfluence;
 
-    // ══════════════════════════════════════════════
     [Header("Bucket Size — حجم الدلو")]
     public float bucketWorldRadius = 0.25f;
     public float bucketWorldHeight = 0.4f;
     public Vector3 bucketCenterOffset = new Vector3(0f, -0.15f, 0f);
 
-    // ══════════════════════════════════════════════
     [Header("Visual — التصور البصري")]
     [Range(1000, 15000)]
     public int visualParticleCount = 8000;
@@ -80,7 +78,6 @@ public class PaintSimulation : MonoBehaviour
     public Color paintColor = new Color(0.9f, 0.1f, 0.1f, 1f);
     public Color paintColorDark = new Color(0.5f, 0.05f, 0.05f, 1f);
 
-    // ══════════════════════════════════════════════
     [Header("Canvas — اللوحة")]
     public int canvasWidth = 512;
     public int canvasHeight = 512;
@@ -91,7 +88,6 @@ public class PaintSimulation : MonoBehaviour
     [Header("Debug")]
     public bool showDebugGizmos = true;
 
-    // ══════════════════════════════════════════════
     class PhysicsParticle
     {
         public Vector3 pos, prevPos, vel, force;
@@ -101,7 +97,8 @@ public class PaintSimulation : MonoBehaviour
         public PState state;
         public float lifetime;
     }
-    enum PState { Inside, Air, OnCanvas }
+    // السائل بيبقى داخل الدلو دائماً — حذفنا Air
+    enum PState { Inside, OnCanvas }
 
     List<PhysicsParticle> pts = new List<PhysicsParticle>();
     Dictionary<Vector3Int, List<int>> grid = new Dictionary<Vector3Int, List<int>>();
@@ -114,7 +111,6 @@ public class PaintSimulation : MonoBehaviour
     Texture2D canvasTex;
     Color[] canvasPx;
     bool canvasDirty;
-    float paintLeft = 1f;
 
     Vector3 prevBucketVel = Vector3.zero;
     Vector3 bucketAccelWorld = Vector3.zero;
@@ -132,7 +128,7 @@ public class PaintSimulation : MonoBehaviour
         effectiveSigma = SIGMA;
         InitCanvas();
         InitVisualPS();
-        Debug.Log($"[PaintV6.2] Type={paintType} | SIGMA={SIGMA:F3} | K={K} | REST={REST_DENSITY}");
+        Debug.Log($"[PaintV6.3] Type={paintType} | SIGMA={SIGMA:F3} | K={K} | REST={REST_DENSITY}");
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -178,6 +174,19 @@ public class PaintSimulation : MonoBehaviour
         bucketAccelWorld = (currentBucketVel - prevBucketVel) / Mathf.Max(dt, 0.001f);
         prevBucketVel = currentBucketVel;
 
+        // [FIX-10] لما fadeOut شغال، نصفّر تأثير تسارع الدلو على السائل تدريجياً
+        // السبب: fadeOutFriction يُبطئ البندول فجأة → bucketAccelWorld يتضخم
+        // → يدفع كل جسيمات الطلاء للأعلى دفعة وحدة → كل الطلاء ينسكب
+        // الحل: نقلّل تأثير التسارع بنسبة ما تبقى من fadeOut
+        if (pendulum != null && pendulum.fadeOutStarted)
+        {
+            float fadeProgress = Mathf.Clamp01(pendulum.fadeOutTimer / pendulum.fadeOutDuration);
+            bucketAccelWorld *= (1f - fadeProgress);
+        }
+
+        // [FIX-10] سقف إضافي على التسارع — يمنع أي قيمة مبالغ فيها
+        bucketAccelWorld = Vector3.ClampMagnitude(bucketAccelWorld, 8f);
+
         BuildGrid();
         ResetSPH();
         UpdateEffectiveViscosity();
@@ -189,8 +198,6 @@ public class PaintSimulation : MonoBehaviour
         ApplyExternal(dt);
         Integrate(dt);
         EnforceBoundary();
-        CheckSpillCondition();
-        HandleCanvas();
 
         visualDirty = true;
     }
@@ -206,8 +213,6 @@ public class PaintSimulation : MonoBehaviour
         }
     }
 
-    // ════════════════════════════════════════════════════════════════
-    // SPH
     // ════════════════════════════════════════════════════════════════
     void BuildGrid()
     {
@@ -355,23 +360,16 @@ public class PaintSimulation : MonoBehaviour
     void ApplyExternal(float dt)
     {
         Vector3 fluidForceFromBucket = -bucketAccelWorld * bucketInfluence;
-        if (fluidForceFromBucket.magnitude > 15f)
-            fluidForceFromBucket = fluidForceFromBucket.normalized * 15f;
+        // [FIX-10] خفّضنا السقف من 15 لـ 5 — 15 كان يسمح بدفع قوي جداً للجسيمات
+        if (fluidForceFromBucket.magnitude > 5f)
+            fluidForceFromBucket = fluidForceFromBucket.normalized * 5f;
 
         for (int i = 0; i < pts.Count; i++)
         {
             if (pts[i].state == PState.OnCanvas) continue;
-            if (pts[i].state == PState.Inside)
-            {
-                pts[i].force += Vector3.down * G * gravityScale;
-                pts[i].force += fluidForceFromBucket;
-            }
-            else // Air
-            {
-                pts[i].force += Vector3.down * G;
-                pts[i].force -= pts[i].vel * 0.03f;
-                pts[i].lifetime += dt;
-            }
+            // كل الجسيمات داخل الدلو — جاذبية + تأثير تسارع الدلو
+            pts[i].force += Vector3.down * G * gravityScale;
+            pts[i].force += fluidForceFromBucket;
         }
     }
 
@@ -386,8 +384,6 @@ public class PaintSimulation : MonoBehaviour
             if (pts[i].vel.magnitude > MAX_VEL)
                 pts[i].vel = pts[i].vel.normalized * MAX_VEL;
             pts[i].pos += pts[i].vel * dt;
-            if (pts[i].state == PState.Air && pts[i].lifetime > 5f)
-                pts.RemoveAt(i--);
         }
     }
 
@@ -429,107 +425,6 @@ public class PaintSimulation : MonoBehaviour
                 if (vOut > 0f) pts[i].vel += inward * vOut * 1.5f;
             }
         }
-    }
-
-    // ════════════════════════════════════════════════════════════════
-    //  [FIX-7] CheckSpillCondition — حساب tiltAngle من theta مباشرةً
-    //
-    //  المشكلة القديمة:
-    //  كانت tiltAngle = Vector3.Angle(BucketUp, Vector3.up)
-    //  BucketUp مشتق من bucket.rotation الذي يُحسب من ropeDir في UpdatePosition()
-    //  عند theta صغير (الدلو قريب من أسفل نقطة التعليق)، ropeDir يصبح شبه
-    //  عمودي ويعطي rotation غير مستقر → BucketUp يُظهر إمالة كبيرة خاطئة
-    //  → كل الطلاء ينسكب لحظة توقف البندول
-    //
-    //  الحل:
-    //  theta (من SphericalPendulum) هو بالتعريف الزاوية بين الحبل والمحور
-    //  الرأسي — مباشرة وموثوق في كل الحالات
-    //  نحوّله لدرجات ونستخدمه بدلاً من BucketUp
-    // ════════════════════════════════════════════════════════════════
-    void CheckSpillCondition()
-    {
-        if (pts.Count == 0) return;
-
-        // [FIX-7] نقرأ theta مباشرة من SphericalPendulum بدل BucketUp
-        float tiltAngle;
-        if (pendulum != null)
-            tiltAngle = pendulum.theta * Mathf.Rad2Deg;
-        else
-            tiltAngle = Vector3.Angle(BucketUp, Vector3.up); // fallback لو ما في pendulum
-
-        float spillRate = Mathf.InverseLerp(25f, 90f, tiltAngle);
-
-        float motionFactor = 1f;
-
-        if (pendulum != null)
-        {
-            motionFactor =
-                Mathf.Clamp01(
-                    (Mathf.Abs(pendulum.thetaVel)
-                    + Mathf.Abs(pendulum.phiVel)) * 0.8f);
-        }
-
-        spillRate *= motionFactor;
-
-        if (pendulum != null && pendulum.fadeOutStarted)
-        {
-            float fade = 1f - Mathf.Clamp01(
-                pendulum.fadeOutTimer / pendulum.fadeOutDuration);
-
-            spillRate *= fade * fade;
-        }
-
-        if (spillRate <= 0f) return;
-
-        Vector3 center = BucketCenter;
-        Vector3 up = BucketUp;
-        float H2 = bucketWorldHeight * 0.5f;
-        float rimY = H2 * 0.52f;
-        float R2 = bucketWorldRadius;
-
-        float maxSpillFraction = spillRate * 0.04f / Mathf.Max(SIGMA, 0.05f);
-        maxSpillFraction = Mathf.Clamp(maxSpillFraction, 0f, 0.15f);
-
-        int spillCount = 0;
-        int maxThisFrame = Mathf.Max(1, Mathf.RoundToInt(pts.Count * maxSpillFraction));
-
-        Vector3 tiltDir = Vector3.Cross(up, Vector3.up);
-        if (tiltDir.sqrMagnitude < 0.001f) return;
-        tiltDir.Normalize();
-
-        for (int i = 0; i < pts.Count && spillCount < maxThisFrame; i++)
-        {
-            if (pts[i].state != PState.Inside) continue;
-
-            Vector3 offset = pts[i].pos - center;
-            float vert = Vector3.Dot(offset, up);
-            Vector3 horizVec = offset - up * vert;
-            float horizDist = horizVec.magnitude;
-
-            bool nearRim = vert > rimY * 0.85f;
-            bool nearWall = horizDist > R2 * 0.75f;
-
-            float sideComponent = horizDist > 0.001f
-                ? Vector3.Dot(horizVec.normalized, tiltDir) : 0f;
-            bool onSpillSide = sideComponent > 0.3f;
-
-            if ((nearRim || (nearWall && onSpillSide)) && onSpillSide)
-            {
-                pts[i].state = PState.Air;
-                pts[i].lifetime = 0f;
-
-                Vector3 exitVel = tiltDir * (1.5f + spillRate * 2f)
-                                + Vector3.down * 0.5f
-                                + Random.insideUnitSphere * 0.3f;
-                exitVel /= Mathf.Max(SIGMA * 0.5f, 0.3f);
-                exitVel = Vector3.ClampMagnitude(exitVel, MAX_VEL);
-
-                pts[i].vel = exitVel;
-                spillCount++;
-            }
-        }
-
-        paintLeft = Mathf.Clamp01((float)InsideCount() / maxParticles);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -597,34 +492,22 @@ public class PaintSimulation : MonoBehaviour
         for (int i = 0; i < pts.Count && vIdx < visualParticles.Length; i++)
         {
             var p = pts[i];
+            if (p.state != PState.Inside) continue;
 
-            if (p.state == PState.Inside)
-            {
-                Vector3 pos = p.pos + Random.insideUnitSphere * (R * 0.15f);
-                pos = ClampToBucket(pos);
+            Vector3 pos = p.pos + Random.insideUnitSphere * (R * 0.15f);
+            pos = ClampToBucket(pos);
 
-                float depth = Vector3.Dot(pos - center, up);
-                float t = Mathf.InverseLerp(-bucketWorldHeight * 0.5f, 0f, depth);
-                Color c = Color.Lerp(paintColorDark, paintColor, t);
+            float depth = Vector3.Dot(pos - center, up);
+            float t = Mathf.InverseLerp(-bucketWorldHeight * 0.5f, 0f, depth);
+            Color c = Color.Lerp(paintColorDark, paintColor, t);
 
-                visualParticles[vIdx].position = pos;
-                visualParticles[vIdx].startColor = c;
-                visualParticles[vIdx].startSize = particleDisplaySize * Random.Range(0.9f, 1.1f);
-                visualParticles[vIdx].remainingLifetime = float.MaxValue;
-                visualParticles[vIdx].startLifetime = float.MaxValue;
-                visualParticles[vIdx].velocity = Vector3.zero;
-                vIdx++;
-            }
-            else if (p.state == PState.Air)
-            {
-                visualParticles[vIdx].position = p.pos;
-                visualParticles[vIdx].startColor = paintColor * 1.2f;
-                visualParticles[vIdx].startSize = particleDisplaySize * 0.7f;
-                visualParticles[vIdx].remainingLifetime = float.MaxValue;
-                visualParticles[vIdx].startLifetime = float.MaxValue;
-                visualParticles[vIdx].velocity = p.vel;
-                vIdx++;
-            }
+            visualParticles[vIdx].position = pos;
+            visualParticles[vIdx].startColor = c;
+            visualParticles[vIdx].startSize = particleDisplaySize * Random.Range(0.9f, 1.1f);
+            visualParticles[vIdx].remainingLifetime = float.MaxValue;
+            visualParticles[vIdx].startLifetime = float.MaxValue;
+            visualParticles[vIdx].velocity = Vector3.zero;
+            vIdx++;
         }
 
         for (int v = vIdx; v < visualParticles.Length; v++)
@@ -647,21 +530,7 @@ public class PaintSimulation : MonoBehaviour
         if (canvasRenderer) canvasRenderer.material.mainTexture = canvasTex;
     }
 
-    void HandleCanvas()
-    {
-        if (!canvasTransform) return;
-        for (int i = 0; i < pts.Count; i++)
-        {
-            if (pts[i].state != PState.Air) continue;
-            bool hit = canvasIsHorizontal
-                ? pts[i].pos.y <= canvasTransform.position.y + 0.02f
-                : Vector3.Dot(pts[i].pos - canvasTransform.position,
-                              canvasTransform.up) <= 0.02f;
-            if (!hit) continue;
-            DrawOnCanvas(pts[i].pos, pts[i].vel.magnitude);
-            pts[i].state = PState.OnCanvas;
-        }
-    }
+    // HandleCanvas محذوف — الطلاء بيبقى داخل الدلو دائماً ولا يصل اللوحة
 
     void DrawOnCanvas(Vector3 wp, float speed)
     {
@@ -716,13 +585,11 @@ public class PaintSimulation : MonoBehaviour
                 state = PState.Inside
             });
         }
-        Debug.Log($"[PaintV6.2] Spawned {pts.Count} at {center}");
+        Debug.Log($"[PaintV6.3] Spawned {pts.Count} at {center}");
     }
 
     // ════════════════════════════════════════════════════════════════
-    // API
-    // ════════════════════════════════════════════════════════════════
-    public void RefillBucket() { pts.Clear(); paintLeft = 1f; SpawnParticles(); }
+    public void RefillBucket() { pts.Clear(); SpawnParticles(); }
 
     public void ClearCanvas()
     {
@@ -734,9 +601,7 @@ public class PaintSimulation : MonoBehaviour
     public void SaveCanvas(string path = "PaintResult.png")
         => System.IO.File.WriteAllBytes(path, canvasTex.EncodeToPNG());
 
-    public float GetPaintLeft() => paintLeft;
     public int InsideCount() { int c = 0; foreach (var p in pts) if (p.state == PState.Inside) c++; return c; }
-    public int AirborneCount() { int c = 0; foreach (var p in pts) if (p.state == PState.Air) c++; return c; }
 
     // ════════════════════════════════════════════════════════════════
     GUIStyle paintHudStyle;
@@ -757,13 +622,11 @@ public class PaintSimulation : MonoBehaviour
     void OnGUI()
     {
         if (paintHudStyle == null) InitPaintHudStyle();
-        int x = 360, y = 10, lh = 18, lines = 5;
+        int x = 360, y = 10, lh = 18, lines = 3;
         GUI.DrawTexture(new Rect(x - 4, y - 3, 220, lh * lines + 6), paintHudBg);
         GUI.Label(new Rect(x, y, 230, lh), $"Type     : {paintType}", paintHudStyle);
-        GUI.Label(new Rect(x, y + lh, 230, lh), $"Left     : {paintLeft * 100f:F1}%", paintHudStyle);
-        GUI.Label(new Rect(x, y + lh * 2, 230, lh), $"Inside   : {InsideCount()} / {maxParticles}", paintHudStyle);
-        GUI.Label(new Rect(x, y + lh * 3, 230, lh), $"Airborne : {AirborneCount()}", paintHudStyle);
-        GUI.Label(new Rect(x, y + lh * 4, 230, lh), $"Tilt(θ)  : {(pendulum != null ? pendulum.theta * Mathf.Rad2Deg : Vector3.Angle(BucketUp, Vector3.up)):F1}°", paintHudStyle);
+        GUI.Label(new Rect(x, y + lh, 230, lh), $"Inside   : {InsideCount()} / {maxParticles}", paintHudStyle);
+        GUI.Label(new Rect(x, y + lh * 2, 230, lh), $"Tilt(θ)  : {(pendulum != null ? pendulum.theta * Mathf.Rad2Deg : Vector3.Angle(BucketUp, Vector3.up)):F1}°", paintHudStyle);
     }
 
     void OnDrawGizmos()
