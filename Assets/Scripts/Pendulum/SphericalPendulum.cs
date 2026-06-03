@@ -1,5 +1,23 @@
 ﻿using UnityEngine;
 
+// ════════════════════════════════════════════════════════════════════
+//  SphericalPendulum.cs  v2.5
+//  التعديلات عن v2.4:
+//  [FIX-10] fadeOutStarted / fadeOutTimer / fadeOutDuration / fadeOutFriction
+//           بدل التوقف المفاجئ عند n_swings → تخميد تدريجي على fadeOutDuration ثانية
+//           الاحتكاك يزداد تدريجياً من 0 لـ 8 حتى يتوقف البندول بشكل طبيعي
+//  [FIX-11] fadeOutStarted / fadeOutTimer / fadeOutDuration صارت public
+//           حتى تقرأها PaintSimulation لتقليل معدل الانسكاب تدريجياً
+// ════════════════════════════════════════════════════════════════════
+//
+//  المعادلات الأساسية (نظام إحداثيات: y للأسفل = -r·cosθ):
+//
+//    θ̈ = sinθ·cosθ·φ̇²  − (g/r)·sinθ  − (2ṙ/r)·θ̇  − μ·θ̇  + F_θ/(m·r)
+//    φ̈ = −2(cosθ/sinθ)·θ̇·φ̇  − (2ṙ/r)·φ̇  − μ·φ̇   + F_φ/(m·r·sinθ)
+//    r̈ = r(θ̇²+sin²θ·φ̇²) + g·cosθ − (k/m)(r−L₀) − (c/m)·ṙ + F_r/m
+//
+// ════════════════════════════════════════════════════════════════════
+
 public class SphericalPendulum : MonoBehaviour
 {
     public Transform bucket;
@@ -8,12 +26,61 @@ public class SphericalPendulum : MonoBehaviour
     // ═══════════════════════════════════════════════
     [Header("Bucket Properties — خصائص الدلو")]
     // ═══════════════════════════════════════════════
+
+    [Tooltip("كتلة الدلو + الطلاء (kg).\n" +
+             "لا تؤثر على سرعة التأرجح (قانون البندول مستقل عن الكتلة).\n" +
+             "تؤثر على: مقاومة السحب الهوائي + تأثير تمايل السائل.")]
     public float bucketMass = 1.0f;
+
+    [Tooltip("نصف قطر الدلو (m).\n" +
+             "يؤثر على: الحجم البصري + الاصطدام بالأرض + السحب الهوائي (A=π·r²).")]
     public float bucketRadius = 0.1f;
 
+    // [FIX-7] المساحة المقطعية محسوبة تلقائياً من نصف القطر
+    float BucketCrossArea => Mathf.PI * bucketRadius * bucketRadius;
+
+    [Tooltip("معامل السحب Cd — كرة≈0.47 | أسطوانة≈0.8 | دلو مفتوح≈1.2")]
+    [Range(0f, 1.5f)] public float dragCoefficient = 0.8f;
+
     // ═══════════════════════════════════════════════
-    [Header("Bucket Vibration — اهتزاز الدلو")]
+    [Header("Bucket Visual Scale — الحجم البصري")]
     // ═══════════════════════════════════════════════
+
+    [Tooltip("الـ Scale الافتراضي للـ mesh في Unity.")]
+    public float meshBaseScale = 0.4f;
+
+    [Tooltip("نصف القطر المقابل لـ meshBaseScale.")]
+    public float meshBaseRadius = 0.1f;
+
+    [Tooltip("تفعيل تغيير الحجم البصري تلقائياً مع تغيير bucketRadius.")]
+    public bool autoScaleBucket = true;
+
+    // ═══════════════════════════════════════════════
+    [Header("Fluid Sloshing — تمايل السائل")]
+    // ═══════════════════════════════════════════════
+
+    [Tooltip("تفعيل تأثير تمايل السائل.")]
+    public bool enableFluidSloshing = true;
+
+    [Tooltip("كتلة السائل داخل الدلو (kg).")]
+    public float fluidMass = 0.6f;
+
+    [Tooltip("طول البندول المكافئ للتمايل L_f (m).")]
+    public float sloshPendulumLength = 0.25f;
+
+    [Tooltip("تخميد تمايل السائل.")]
+    [Range(0f, 10f)] public float sloshDamping = 3f;
+
+    [Tooltip("أقصى إزاحة للسائل داخل الدلو (m).")]
+    public float sloshMaxDisplacement = 0.1f;
+
+    float sloshThetaDir, sloshThetaDirVel;
+    float sloshPhiDir, sloshPhiDirVel;
+
+    // ═══════════════════════════════════════════════
+    [Header("Bucket Vibration — اهتزاز الدلو (بصري)")]
+    // ═══════════════════════════════════════════════
+
     public bool enableBucketVibration = true;
     public float vibrationAmplitude = 0.03f;
     public float vibrationFrequency = 12f;
@@ -25,54 +92,94 @@ public class SphericalPendulum : MonoBehaviour
     // ═══════════════════════════════════════════════
     [Header("Rope Properties — خصائص التعليق")]
     // ═══════════════════════════════════════════════
+
     public Vector3 pivotPosition = new Vector3(0f, 3f, 0f);
+
+    [Tooltip("طول الحبل المرتخي L₀ (m).")]
     public float restLength = 1.5f;
+
+    [Tooltip("صلابة الحبل k (N/m).")]
     public float ropeStiffness = 10000f;
+
+    [Tooltip("تخميد التمدد الطولي للحبل (N·s/m).")]
     public float radialDamping = 0.1f;
 
+    [Tooltip("الحبل يشدّ فقط ولا يدفع.")]
+    public bool ropeOnlyPullsNoPush = true;
+
     // ═══════════════════════════════════════════════
-    [Header("Rope Twist — فتل الحبل")]
+    [Header("Rope Twist — فتل الحبل (بصري)")]
     // ═══════════════════════════════════════════════
+
     public bool enableRopeTwist = true;
     public float ropeTwistStiffness = 8f;
     public float ropeTwistDamping = 1f;
 
     float ropeTwistAngle;
     float ropeTwistVelocity;
-
-    float r;
-    float rVel;
+    float r, rVel;
 
     // ═══════════════════════════════════════════════
     [Header("Initial Conditions — خصائص الحركة")]
     // ═══════════════════════════════════════════════
+
     [Range(0.01f, 179f)] public float thetaDeg = 45f;
     [Range(0f, 360f)] public float phiDeg = 0f;
     public float thetaVel0 = 0f;
     public float phiVel0 = 0f;
 
-    float theta, phi, thetaVel, phiVel;
+    // [FIX-6] public حتى يقرأها PaintSimulation
+    public float theta, phi, thetaVel, phiVel;
 
     // ═══════════════════════════════════════════════
     [Header("Environment — خصائص البيئة")]
     // ═══════════════════════════════════════════════
+
+    [Tooltip("تسارع الجاذبية g (m/s²).")]
     public float gravity = 9.81f;
-    public float angularDamping = 0.05f;
-    public float airDragCoeff = 0.01f;
+
+    [Tooltip("كثافة الهواء ρ (kg/m³).")]
+    public float airDensity = 1.225f;
+
+    [Tooltip("تخميد زاوي داخلي (1/s).")]
+    public float jointFriction = 0.02f;
+
     [Range(0f, 1f)]
+    [Tooltip("الرطوبة النسبية.")]
     public float humidity = 0.5f;
-    public Vector3 windForce = Vector3.zero;
+
+    [Tooltip("متجه الريح في الفضاء العالمي (m/s).")]
+    public Vector3 windVelocity = Vector3.zero;
 
     // ═══════════════════════════════════════════════
     [Header("Simulation Control — التحكم بالمحاكاة")]
     // ═══════════════════════════════════════════════
+
     public int n_swings = 10;
     public float floorY = -1.5f;
-    public float bounce = 0.3f;
+    [Range(0f, 1f)] public float bounce = 0.3f;
+
+    [Tooltip("مضاعِف سرعة الزمن.")]
+    [Range(0.1f, 3f)] public float timeScale = 1f;
+
+    // ═══════════════════════════════════════════════
+    [Header("FadeOut — التخميد التدريجي عند التوقف")]
+    // ═══════════════════════════════════════════════
+
+    // [FIX-10] بدل التوقف المفاجئ → تخميد تدريجي
+    [Tooltip("مدة التخميد التدريجي بعد انتهاء التأرجح (ثانية).")]
+    public float fadeOutDuration = 3.0f;
+
+    // [FIX-11] public حتى تقرأها PaintSimulation
+    [HideInInspector] public bool fadeOutStarted = false;
+    [HideInInspector] public float fadeOutTimer = 0f;
+
+    float fadeOutFriction = 0f;
 
     // ═══════════════════════════════════════════════
     [Header("Camera Follow — تتبع الكاميرا")]
     // ═══════════════════════════════════════════════
+
     public bool enableCameraFollow = true;
     public Camera mainCamera;
     public Vector3 cameraOffset = new Vector3(0f, 1f, -5f);
@@ -81,6 +188,7 @@ public class SphericalPendulum : MonoBehaviour
     // ═══════════════════════════════════════════════
     [Header("Trail — مسار الدلو")]
     // ═══════════════════════════════════════════════
+
     public bool showTrail = true;
     public float trailTime = 5f;
     public float trailStartWidth = 0.05f;
@@ -89,9 +197,7 @@ public class SphericalPendulum : MonoBehaviour
 
     TrailRenderer trail;
 
-    // ═══════════════════════════════════════════════
-    // متغيرات داخلية
-    // ═══════════════════════════════════════════════
+    // ─── متغيرات داخلية ───────────────────────────
     int zeroCrossCount = 0;
     float prevThetaVel;
     bool simRunning = true;
@@ -99,6 +205,9 @@ public class SphericalPendulum : MonoBehaviour
     float energyAtStart = 0f;
     float maxEnergyDrift = 0f;
     int nanFrameCount = 0;
+
+    Vector3 lastBucketVelocity = Vector3.zero;
+    Vector3 sloshPrevVelocity = Vector3.zero;
 
     // ════════════════════════════════════════════════════════════════
     void Start()
@@ -113,6 +222,9 @@ public class SphericalPendulum : MonoBehaviour
         rVel = 0f;
 
         prevThetaVel = thetaVel;
+        // [FIX-2] تهيئة صحيحة تمنع قفزة التسارع في أول frame
+        sloshPrevVelocity = LinearVelocity(theta, phi, r, thetaVel, phiVel, rVel);
+
         SetupTrail();
 
         if (enableCameraFollow && mainCamera == null)
@@ -121,8 +233,9 @@ public class SphericalPendulum : MonoBehaviour
         UpdatePosition();
         energyAtStart = TotalEnergy();
 
-        Debug.Log($"[Pendulum] Start → pivot={pivotPosition} | " +
-                  $"bucket={bucket.position} | floorY={floorY} | E0={energyAtStart:F3} J");
+        Debug.Log($"[Pendulum v2.5] pivot={pivotPosition} | g={gravity} | " +
+                  $"E0={energyAtStart:F3} J | T={TheoreticalPeriod():F3} s | " +
+                  $"radius={bucketRadius} → CrossArea={BucketCrossArea:F5} m²");
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -130,19 +243,17 @@ public class SphericalPendulum : MonoBehaviour
     {
         if (!simRunning) return;
 
-        float dt = Time.fixedDeltaTime;
+        float dt = Time.fixedDeltaTime * timeScale;
 
         RK4Step(dt);
-
-        // ── التأثيرات البصرية الثانوية (فوق RK4 — لا تؤثر على الفيزياء الأساسية)
         UpdateSecondaryEffects(dt);
+        UpdateSloshing(dt);
 
         // ── حماية NaN ────────────────────────────────────────────────
         if (HasNaN())
         {
             nanFrameCount++;
-            Debug.LogError($"[Pendulum] NaN at frame {Time.frameCount}! " +
-                           $"θ={theta:F3} φ={phi:F3} r={r:F3}");
+            Debug.LogError($"[Pendulum] NaN frame={Time.frameCount} θ={theta:F3} φ={phi:F3} r={r:F3}");
             theta = Mathf.Clamp(float.IsNaN(theta) ? 0.5f : theta, 0.01f, Mathf.PI - 0.01f);
             phi = float.IsNaN(phi) ? 0f : phi;
             r = float.IsNaN(r) ? restLength : Mathf.Max(r, 0.2f);
@@ -167,17 +278,20 @@ public class SphericalPendulum : MonoBehaviour
 
         // ── حماية r ──────────────────────────────────────────────────
         if (r < 0.2f) { r = 0.2f; rVel = Mathf.Abs(rVel); }
+        float maxStretch = restLength * 1.5f;
+        if (r > maxStretch) { r = maxStretch; if (rVel > 0f) rVel = 0f; }
 
         UpdatePosition();
 
-        if (prevThetaVel * thetaVel < 0f) zeroCrossCount++;
+        // [FIX-1] عدّ التأرجح مع حدّ أدنى للسرعة يمنع العدّ الخاطئ
+        if (prevThetaVel * thetaVel < 0f && Mathf.Abs(thetaVel) > 0.01f)
+            zeroCrossCount++;
         prevThetaVel = thetaVel;
 
         HandleCollision();
         CheckStopConditions();
 
-        // ── تتبع انحراف الطاقة ───────────────────────────────────────
-        if (angularDamping == 0f && airDragCoeff == 0f)
+        if (jointFriction == 0f && airDensity == 0f)
         {
             float drift = Mathf.Abs(TotalEnergy() - energyAtStart)
                         / Mathf.Max(energyAtStart, 0.001f) * 100f;
@@ -186,45 +300,68 @@ public class SphericalPendulum : MonoBehaviour
     }
 
     // ════════════════════════════════════════════════════════════════
-    // التأثيرات الثانوية — Visual Physics Layer
-    // مستقلة تماماً عن RK4 — لا تؤثر على theta/phi/r
-    // ════════════════════════════════════════════════════════════════
     void UpdateSecondaryEffects(float dt)
     {
-        // ── اهتزاز الدلو ─────────────────────────────────────────────
         if (enableBucketVibration)
         {
-            // الاهتزاز يزيد مع السرعات الزاوية
-            float accel = Mathf.Abs(thetaVel)
-                        + Mathf.Abs(phiVel)
-                        + Mathf.Abs(rVel);
-
+            float accel = Mathf.Abs(thetaVel) + Mathf.Abs(phiVel) + Mathf.Abs(rVel);
             vibrationStrength += accel * 0.02f;
             vibrationStrength *= Mathf.Exp(-vibrationDamping * dt);
             vibrationStrength = Mathf.Clamp01(vibrationStrength);
             vibrationPhase += vibrationFrequency * dt;
         }
 
-        // ── فتل الحبل ────────────────────────────────────────────────
         if (enableRopeTwist)
         {
-            // الفتل يتراكم مع phiVel — ثم نابض يعيده
             float twistAcc =
                 -ropeTwistStiffness * ropeTwistAngle
                 - ropeTwistDamping * ropeTwistVelocity
                 + phiVel * 0.3f;
-
             ropeTwistVelocity += twistAcc * dt;
             ropeTwistAngle += ropeTwistVelocity * dt;
-
-            // حد أقصى للفتل — 20 درجة
-            ropeTwistAngle = Mathf.Clamp(
-                ropeTwistAngle,
-                -20f * Mathf.Deg2Rad,
-                 20f * Mathf.Deg2Rad);
+            ropeTwistAngle = Mathf.Clamp(ropeTwistAngle,
+                -20f * Mathf.Deg2Rad, 20f * Mathf.Deg2Rad);
         }
     }
 
+    // ════════════════════════════════════════════════════════════════
+    //  تمايل السائل — نموذج الكتلة المكافئة
+    // ════════════════════════════════════════════════════════════════
+    void UpdateSloshing(float dt)
+    {
+        if (!enableFluidSloshing || fluidMass <= 0f) return;
+
+        float Lf = Mathf.Max(sloshPendulumLength, 0.01f);
+        float ks = fluidMass * gravity / Lf;
+        float cs = sloshDamping;
+
+        Vector3 vNow = LinearVelocity(theta, phi, r, thetaVel, phiVel, rVel);
+        Vector3 aWorld = (vNow - sloshPrevVelocity) / Mathf.Max(dt, 1e-4f);
+        sloshPrevVelocity = vNow;
+
+        Vector3 eR, eTheta, ePhi;
+        GetUnitVectors(theta, phi, out eR, out eTheta, out ePhi);
+
+        float aTheta = Mathf.Clamp(Vector3.Dot(aWorld, eTheta), -30f, 30f);
+        float aPhi = Mathf.Clamp(Vector3.Dot(aWorld, ePhi), -30f, 30f);
+
+        float sAccTheta = (-ks * sloshThetaDir - cs * sloshThetaDirVel - fluidMass * aTheta) / fluidMass;
+        float sAccPhi = (-ks * sloshPhiDir - cs * sloshPhiDirVel - fluidMass * aPhi) / fluidMass;
+
+        sloshThetaDirVel = Mathf.Clamp(sloshThetaDirVel + sAccTheta * dt, -2f, 2f);
+        sloshPhiDirVel = Mathf.Clamp(sloshPhiDirVel + sAccPhi * dt, -2f, 2f);
+
+        sloshThetaDir = Mathf.Clamp(sloshThetaDir + sloshThetaDirVel * dt,
+                        -sloshMaxDisplacement, sloshMaxDisplacement);
+        sloshPhiDir = Mathf.Clamp(sloshPhiDir + sloshPhiDirVel * dt,
+                        -sloshMaxDisplacement, sloshMaxDisplacement);
+    }
+
+    public float SloshMagnitude =>
+        Mathf.Sqrt(sloshThetaDir * sloshThetaDir + sloshPhiDir * sloshPhiDir);
+
+    // ════════════════════════════════════════════════════════════════
+    //  UpdatePosition
     // ════════════════════════════════════════════════════════════════
     void UpdatePosition()
     {
@@ -234,54 +371,56 @@ public class SphericalPendulum : MonoBehaviour
 
         Vector3 worldPos = pivotPosition + new Vector3(x, y, z);
 
-        // ── إضافة الاهتزاز البصري ────────────────────────────────────
         if (enableBucketVibration && bucket != null)
         {
-            float vib = vibrationAmplitude
-                           * vibrationStrength
-                           * Mathf.Sin(vibrationPhase);
-            Vector3 shake = bucket.right * vib;
-            worldPos += shake;
+            float vib = vibrationAmplitude * vibrationStrength * Mathf.Sin(vibrationPhase);
+            worldPos += bucket.right * vib;
         }
 
         bucket.position = worldPos;
 
-        // ── دوران الدلو: يواجه اتجاه الحركة + فتل الحبل ─────────────
+        // [FIX-8] تحديث الحجم البصري تلقائياً
+        if (autoScaleBucket && meshBaseRadius > 0f)
+        {
+            float s = Mathf.Max(meshBaseScale * (bucketRadius / meshBaseRadius), 0.01f);
+            bucket.localScale = new Vector3(s, s, s);
+        }
+
         Vector3 ropeDir = (worldPos - pivotPosition).normalized;
         if (ropeDir.sqrMagnitude > 0.001f)
         {
             Quaternion swingRot = Quaternion.LookRotation(ropeDir, Vector3.up);
-
             if (enableRopeTwist)
-            {
-                swingRot *= Quaternion.AngleAxis(
-                    ropeTwistAngle * Mathf.Rad2Deg,
-                    Vector3.up);
-            }
-
+                swingRot *= Quaternion.AngleAxis(ropeTwistAngle * Mathf.Rad2Deg, Vector3.up);
             bucket.rotation = swingRot;
         }
     }
 
     // ════════════════════════════════════════════════════════════════
+    //  [FIX-3] HandleCollision — يُعدِّل r مباشرة
+    // ════════════════════════════════════════════════════════════════
     void HandleCollision()
     {
-        float bucketBottom = bucket.position.y - bucketRadius;
-        if (bucketBottom < floorY)
-        {
-            Vector3 pos = bucket.position;
-            pos.y = floorY + bucketRadius;
-            bucket.position = pos;
+        float cosT = Mathf.Cos(theta);
+        float bucketBottomY = pivotPosition.y - r * cosT - bucketRadius;
 
-            rVel = -rVel * bounce;
+        if (bucketBottomY < floorY)
+        {
+            float newR = (Mathf.Abs(cosT) > 0.01f)
+                ? (pivotPosition.y - floorY - bucketRadius) / cosT
+                : r;
+
+            newR = Mathf.Max(newR, 0.2f);
+
+            if (rVel < 0f) rVel = -rVel * bounce;
+            r = newR;
             thetaVel *= 0.7f;
             phiVel *= 0.7f;
 
-            // الاصطدام يزيد الاهتزاز
             if (enableBucketVibration)
                 vibrationStrength = Mathf.Clamp01(vibrationStrength + 0.5f);
 
-            Debug.Log($"[Pendulum] Floor collision at t={Time.time:F2}s");
+            Debug.Log($"[Pendulum] Floor collision t={Time.time:F2}s | r={r:F3}");
         }
     }
 
@@ -299,6 +438,9 @@ public class SphericalPendulum : MonoBehaviour
     }
 
     // ════════════════════════════════════════════════════════════════
+    //  معادلات الحركة
+    //  [FIX-10] fadeOutFriction تُضاف على jointFriction أثناء التخميد
+    // ════════════════════════════════════════════════════════════════
     Vector6 Derivatives(Vector6 s)
     {
         float th = s.a, ph = s.b, rr = s.c;
@@ -311,50 +453,98 @@ public class SphericalPendulum : MonoBehaviour
 
         rr = Mathf.Max(rr, 0.1f);
         float mass = Mathf.Max(bucketMass, 0.01f);
-        float effDamp = angularDamping * (1f + humidity * 0.2f);
 
-        float dragTheta = -airDragCoeff * thVel * Mathf.Abs(thVel);
-        float dragPhi = -airDragCoeff * phVel * Mathf.Abs(phVel);
-        float dragR = -airDragCoeff * rrVel * Mathf.Abs(rrVel);
+        // السحب الهوائي
+        float rhoEff = airDensity * (1f + humidity * 0.01f);
+        Vector3 vBucket = LinearVelocity(th, ph, rr, thVel, phVel, rrVel);
+        Vector3 vRel = vBucket - windVelocity;
+        float vRelMag = vRel.magnitude;
 
-        float windTheta = 0f, windPhi = 0f;
-        if (windForce.sqrMagnitude > 0f)
+        Vector3 dragForce = Vector3.zero;
+        if (vRelMag > 1e-4f)
+            dragForce = -0.5f * rhoEff * dragCoefficient * BucketCrossArea
+                        * vRelMag * vRel;
+
+        Vector3 eR, eTheta, ePhi;
+        GetUnitVectors(th, ph, out eR, out eTheta, out ePhi);
+
+        float dragTheta = Mathf.Clamp(Vector3.Dot(dragForce, eTheta) / (mass * rr), -100f, 100f);
+        float dragPhi = Mathf.Clamp(Vector3.Dot(dragForce, ePhi) / (mass * rr * sinT), -100f, 100f);
+        float dragR = Mathf.Clamp(Vector3.Dot(dragForce, eR) / mass, -100f, 100f);
+
+        // تمايل السائل
+        float sloshTheta = 0f, sloshPhi = 0f;
+        if (enableFluidSloshing && fluidMass > 0f)
         {
-            windTheta = (windForce.x * Mathf.Cos(ph) + windForce.z * Mathf.Sin(ph))
-                      / (mass * rr);
-            windPhi = (-windForce.x * Mathf.Sin(ph) + windForce.z * Mathf.Cos(ph))
-                      / (mass * rr * sinT);
-            windTheta = Mathf.Clamp(windTheta, -50f, 50f);
-            windPhi = Mathf.Clamp(windPhi, -50f, 50f);
+            float Lf = Mathf.Max(sloshPendulumLength, 0.01f);
+            float ks = fluidMass * gravity / Lf;
+            float cs = sloshDamping;
+            float Ftheta = ks * sloshThetaDir + cs * sloshThetaDirVel;
+            float Fphi = ks * sloshPhiDir + cs * sloshPhiDirVel;
+            float mTotal = mass + fluidMass;
+            sloshTheta = Mathf.Clamp(-Ftheta / (mTotal * rr), -8f, 8f);
+            sloshPhi = Mathf.Clamp(-Fphi / (mTotal * rr * sinT), -8f, 8f);
         }
 
+        // [FIX-10] الاحتكاك الكلي = jointFriction + fadeOutFriction
+        float totalFriction = jointFriction + fadeOutFriction;
+
+        // معادلة θ
         float thetaAcc =
               sinT * cosT * phVel * phVel
             - (gravity / rr) * sinT
             - (2f * rrVel / rr) * thVel
-            - effDamp * thVel
-            + dragTheta / mass
-            + windTheta;
+            - totalFriction * thVel
+            + dragTheta
+            + sloshTheta;
 
+        // معادلة φ
         float phiAcc =
             -2f * (cosT / sinT) * thVel * phVel
             - (2f * rrVel / rr) * phVel
-            - effDamp * phVel
-            + dragPhi / mass
-            + windPhi;
+            - totalFriction * phVel
+            + dragPhi
+            + sloshPhi;
+
+        // معادلة r — نابض الحبل
+        float springForce = (ropeOnlyPullsNoPush && rr < restLength)
+            ? 0f
+            : -(ropeStiffness / mass) * (rr - restLength);
 
         float rAcc =
               rr * (thVel * thVel + sinT * sinT * phVel * phVel)
             + gravity * cosT
-            - (ropeStiffness / mass) * (rr - restLength)
+            + springForce
             - (radialDamping / mass) * rrVel
-            + dragR / mass;
+            + dragR;
 
         thetaAcc = Mathf.Clamp(thetaAcc, -200f, 200f);
         phiAcc = Mathf.Clamp(phiAcc, -200f, 200f);
         rAcc = Mathf.Clamp(rAcc, -200f, 200f);
 
         return new Vector6(thVel, phVel, rrVel, thetaAcc, phiAcc, rAcc);
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    void GetUnitVectors(float th, float ph,
+                        out Vector3 eR, out Vector3 eTheta, out Vector3 ePhi)
+    {
+        float sinT = Mathf.Sin(th), cosT = Mathf.Cos(th);
+        float sinP = Mathf.Sin(ph), cosP = Mathf.Cos(ph);
+        eR = new Vector3(sinT * cosP, -cosT, sinT * sinP);
+        eTheta = new Vector3(cosT * cosP, sinT, cosT * sinP);
+        ePhi = new Vector3(-sinP, 0f, cosP);
+    }
+
+    Vector3 LinearVelocity(float th, float ph, float rr,
+                           float thVel, float phVel, float rrVel)
+    {
+        float sinT = Mathf.Sin(th), cosT = Mathf.Cos(th);
+        float sinP = Mathf.Sin(ph), cosP = Mathf.Cos(ph);
+        float vx = rrVel * sinT * cosP + rr * thVel * cosT * cosP - rr * phVel * sinT * sinP;
+        float vy = -rrVel * cosT + rr * thVel * sinT;
+        float vz = rrVel * sinT * sinP + rr * thVel * cosT * sinP + rr * phVel * sinT * cosP;
+        return new Vector3(vx, vy, vz);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -370,23 +560,68 @@ public class SphericalPendulum : MonoBehaviour
 
     void StopSimulation(string reason)
     {
-        simRunning = false; stopReason = reason;
-        Debug.Log($"[Pendulum] Finished — Swings: {zeroCrossCount / 2} | Reason: {reason}");
-        Debug.Log($"[Pendulum] Max Energy Drift: {maxEnergyDrift:F4} %");
+        simRunning = false;
+        stopReason = reason;
+        Debug.Log($"[Pendulum] Finished — Swings:{zeroCrossCount / 2} | {reason}");
+        Debug.Log($"[Pendulum] Max Energy Drift: {maxEnergyDrift:F4}%");
         if (trail != null) trail.emitting = false;
     }
 
+    // ════════════════════════════════════════════════════════════════
+    //  [FIX-10] CheckStopConditions — تخميد تدريجي بدل توقف مفاجئ
+    //
+    //  الفكرة:
+    //  عند اكتمال n_swings أو أي شرط توقف آخر، لا نوقف المحاكاة فوراً.
+    //  بدلاً من ذلك نبدأ fadeOut: نزيد fadeOutFriction تدريجياً من 0 إلى 8
+    //  خلال fadeOutDuration ثانية حتى يتوقف البندول بشكل طبيعي.
+    // ════════════════════════════════════════════════════════════════
     void CheckStopConditions()
     {
-        bool stopSwings = (zeroCrossCount >= 2 * n_swings);
-        bool stopStill = (theta < 0.05f
-                        && Mathf.Abs(thetaVel) < 0.005f
-                        && Mathf.Abs(phiVel) < 0.005f
-                        && Mathf.Abs(rVel) < 0.005f);
-        bool stopEnergy = (TotalEnergy() < 0.001f);
-        if (stopSwings) StopSimulation("n_swings reached");
-        else if (stopStill) StopSimulation("pendulum stopped naturally");
-        else if (stopEnergy) StopSimulation("energy depleted");
+        bool swingsReached = zeroCrossCount >= 2 * n_swings;
+        bool naturalStop = theta < 0.008f
+                          && Mathf.Abs(thetaVel) < 0.001f
+                          && Mathf.Abs(phiVel) < 0.001f
+                          && Mathf.Abs(rVel) < 0.001f;
+        bool energyGone = TotalEnergy() < 0.0001f;
+
+        // ── بدء التخميد التدريجي ──────────────────────────────────
+        if ((swingsReached || naturalStop || energyGone) && !fadeOutStarted)
+        {
+            fadeOutStarted = true;
+            fadeOutTimer = 0f;
+            fadeOutFriction = 0f;
+            Debug.Log($"[Pendulum v2.5] FadeOut started — " +
+                      $"reason: {(swingsReached ? "n_swings" : naturalStop ? "natural" : "energy")} | " +
+                      $"duration={fadeOutDuration}s");
+        }
+
+        // ── تطبيق التخميد التدريجي ────────────────────────────────
+        if (fadeOutStarted && simRunning)
+        {
+            fadeOutTimer += Time.fixedDeltaTime * timeScale;
+            float t = Mathf.Clamp01(fadeOutTimer / fadeOutDuration);
+
+            // الاحتكاك يزداد بشكل تربيعي (easing in) من 0 إلى 8
+            fadeOutFriction = Mathf.Lerp(0f, 8f, t * t);
+
+            // التوقف الكامل: انتهت المدة أو الحركة أصبحت شبه صفر
+            float angularEnergy =
+                  Mathf.Abs(thetaVel)
+                + Mathf.Abs(phiVel)
+                + Mathf.Abs(rVel);
+
+            bool fullyDone =
+                  angularEnergy < 0.0002f
+               && theta < 0.003f;
+
+            if (fullyDone)
+            {
+                string reason = swingsReached ? "n_swings reached"
+                              : naturalStop ? "pendulum stopped naturally"
+                              : "energy depleted";
+                StopSimulation(reason);
+            }
+        }
     }
 
     void LateUpdate()
@@ -394,7 +629,8 @@ public class SphericalPendulum : MonoBehaviour
         if (!enableCameraFollow || mainCamera == null || bucket == null) return;
         Vector3 targetPos = bucket.position + cameraOffset;
         mainCamera.transform.position = Vector3.Lerp(
-            mainCamera.transform.position, targetPos, Time.deltaTime * cameraSmoothing);
+            mainCamera.transform.position, targetPos,
+            Time.deltaTime * cameraSmoothing);
         mainCamera.transform.LookAt(bucket.position);
     }
 
@@ -428,6 +664,7 @@ public class SphericalPendulum : MonoBehaviour
         return kinetic + potGravity + potSpring;
     }
 
+    // ── واجهات عامة ──────────────────────────────────────────────
     public float GetGeff()
     {
         float sinT = Mathf.Sin(theta);
@@ -438,39 +675,55 @@ public class SphericalPendulum : MonoBehaviour
 
     public Vector3 GetBucketVelocity()
     {
-        float sinT = Mathf.Sin(theta), cosT = Mathf.Cos(theta);
-        float sinP = Mathf.Sin(phi), cosP = Mathf.Cos(phi);
-        float vx = r * (thetaVel * cosT * cosP - phiVel * sinT * sinP) + rVel * sinT * cosP;
-        float vy = -r * thetaVel * sinT - rVel * cosT;
-        float vz = r * (thetaVel * cosT * sinP + phiVel * sinT * cosP) + rVel * sinT * sinP;
-        return new Vector3(vx, vy, vz);
+        lastBucketVelocity = LinearVelocity(theta, phi, r, thetaVel, phiVel, rVel);
+        return lastBucketVelocity;
     }
 
-    // خصائص للقراءة من سكربتات أخرى
+    public float TheoreticalPeriod()
+        => 2f * Mathf.PI * Mathf.Sqrt(restLength / Mathf.Max(gravity, 0.01f));
+
+    public void SetFluidMass(float m) { fluidMass = Mathf.Max(0f, m); }
+
     public float TorsionAngleDeg => ropeTwistAngle * Mathf.Rad2Deg;
     public float VibrationStrength => vibrationStrength;
     public bool IsRunning => simRunning;
 
-    // ════════════════════════════════════════════════════════════════
+    // ── HUD ──────────────────────────────────────────────────────
+    GUIStyle hudStyle;
+    Texture2D hudBg;
+
+    void InitHudStyle()
+    {
+        hudBg = new Texture2D(1, 1);
+        hudBg.SetPixel(0, 0, new Color(0f, 0f, 0f, 0.6f));
+        hudBg.Apply();
+        hudStyle = new GUIStyle
+        {
+            fontSize = 11,
+            fontStyle = FontStyle.Normal,
+            padding = new RectOffset(4, 4, 2, 2)
+        };
+        hudStyle.normal.textColor = Color.white;
+    }
+
     void OnGUI()
     {
-        int x = 10, y = 10, lh = 22;
-        GUI.Label(new Rect(x, y, 320, lh), $"Energy      : {TotalEnergy():F4} J");
-        GUI.Label(new Rect(x, y + lh, 320, lh), $"EnergyDrift : {maxEnergyDrift:F4} %");
-        GUI.Label(new Rect(x, y + lh * 2, 320, lh), $"r           : {r:F3} m");
-        GUI.Label(new Rect(x, y + lh * 3, 320, lh), $"θ           : {theta * Mathf.Rad2Deg:F1} °");
-        GUI.Label(new Rect(x, y + lh * 4, 320, lh), $"φ           : {phi * Mathf.Rad2Deg % 360f:F1} °");
-        GUI.Label(new Rect(x, y + lh * 5, 320, lh), $"g_eff       : {GetGeff():F3} m/s²");
-        GUI.Label(new Rect(x, y + lh * 6, 320, lh), $"|v_bucket|  : {GetBucketVelocity().magnitude:F3} m/s");
-        GUI.Label(new Rect(x, y + lh * 7, 320, lh), $"Swings      : {zeroCrossCount / 2} / {n_swings}");
-        GUI.Label(new Rect(x, y + lh * 8, 320, lh), $"Humidity    : {humidity * 100f:F0} %");
-        GUI.Label(new Rect(x, y + lh * 9, 320, lh), $"pivot Y     : {pivotPosition.y:F1} m");
-        GUI.Label(new Rect(x, y + lh * 10, 320, lh), $"bucket Y    : {bucket.position.y:F2} m");
-        GUI.Label(new Rect(x, y + lh * 11, 320, lh), $"Torsion     : {TorsionAngleDeg:F1} °");
-        GUI.Label(new Rect(x, y + lh * 12, 320, lh), $"Vibration   : {VibrationStrength * 100f:F1} %");
-        GUI.Label(new Rect(x, y + lh * 13, 320, lh), $"NaN count   : {nanFrameCount}");
-        GUI.Label(new Rect(x, y + lh * 14, 320, lh), $"StopReason  : {stopReason}");
-        GUI.Label(new Rect(x, y + lh * 15, 320, lh), $"Running     : {simRunning}");
+        if (hudStyle == null) InitHudStyle();
+        int x = 10, y = 10, lh = 18, lines = 11;
+        GUI.DrawTexture(new Rect(x - 4, y - 3, 230, lh * lines + 6), hudBg);
+        float currentScale = (meshBaseRadius > 0f)
+            ? meshBaseScale * (bucketRadius / meshBaseRadius) : meshBaseScale;
+        GUI.Label(new Rect(x, y, 230, lh), $"θ          : {theta * Mathf.Rad2Deg:F1}°", hudStyle);
+        GUI.Label(new Rect(x, y + lh, 230, lh), $"φ          : {phi * Mathf.Rad2Deg % 360f:F1}°", hudStyle);
+        GUI.Label(new Rect(x, y + lh * 2, 230, lh), $"r          : {r:F3} m", hudStyle);
+        GUI.Label(new Rect(x, y + lh * 3, 230, lh), $"|v|        : {GetBucketVelocity().magnitude:F2} m/s", hudStyle);
+        GUI.Label(new Rect(x, y + lh * 4, 230, lh), $"Swings     : {zeroCrossCount / 2} / {n_swings}", hudStyle);
+        GUI.Label(new Rect(x, y + lh * 5, 230, lh), $"T_theory   : {TheoreticalPeriod():F3} s", hudStyle);
+        GUI.Label(new Rect(x, y + lh * 6, 230, lh), $"Running    : {simRunning}", hudStyle);
+        GUI.Label(new Rect(x, y + lh * 7, 230, lh), $"FadeOut    : {(fadeOutStarted ? $"{fadeOutTimer:F1}/{fadeOutDuration:F1}s" : "—")}", hudStyle);
+        GUI.Label(new Rect(x, y + lh * 8, 230, lh), $"FadeFric   : {fadeOutFriction:F2}", hudStyle);
+        GUI.Label(new Rect(x, y + lh * 9, 230, lh), $"Radius     : {bucketRadius:F3} → Scale:{currentScale:F3}", hudStyle);
+        GUI.Label(new Rect(x, y + lh * 10, 230, lh), $"CrossArea  : {BucketCrossArea:F5} m²", hudStyle);
     }
 }
 
@@ -478,10 +731,13 @@ public class SphericalPendulum : MonoBehaviour
 public struct Vector6
 {
     public float a, b, c, d, e, f;
+
     public Vector6(float A, float B, float C, float D, float E, float F)
     { a = A; b = B; c = C; d = D; e = E; f = F; }
+
     public static Vector6 operator +(Vector6 u, Vector6 v)
         => new Vector6(u.a + v.a, u.b + v.b, u.c + v.c, u.d + v.d, u.e + v.e, u.f + v.f);
+
     public static Vector6 operator *(Vector6 u, float s)
         => new Vector6(u.a * s, u.b * s, u.c * s, u.d * s, u.e * s, u.f * s);
 }
