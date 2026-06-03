@@ -27,15 +27,22 @@ public class PaintSimulation : MonoBehaviour
     public Renderer canvasRenderer;
 
     [Header("Paint Type — نوع الطلاء")]
-    public PaintType paintType = PaintType.Normal;
+    public PaintType paintType = PaintType.Acrylic;
 
+    // ════════════════════════════════════════════════════════════════
+    //  أنواع الطلاء الحقيقية المستخدمة في الرسم بالدلو المتأرجح
+    //  المعاملات مبنية على الخصائص الفيزيائية الفعلية لكل نوع
+    // ════════════════════════════════════════════════════════════════
     public enum PaintType
     {
-        Watercolor,
-        Normal,
-        Acrylic,
-        Oil,
-        Honey
+        Watercolor, // مائي خفيف   — كثافة 1.0 g/cm³، لزوجة 1-3 mPa·s
+        Acrylic,    // أكريليك     — كثافة 1.1 g/cm³، لزوجة 50-200 mPa·s
+        OilPaint,   // زيتي        — كثافة 1.3 g/cm³، لزوجة 200-300 mPa·s
+        Tempera,    // تيمبيرا     — كثافة 1.05 g/cm³، لزوجة 10-50 mPa·s
+        Gouache,    // غواش        — كثافة 1.15 g/cm³، لزوجة 100-400 mPa·s
+        Latex,      // لاتكس جداري — كثافة 1.2 g/cm³، لزوجة 400-1000 mPa·s
+        Enamel,     // مينا لامع   — كثافة 1.4 g/cm³، لزوجة 300-500 mPa·s
+        Ink         // حبر         — كثافة 1.0 g/cm³، لزوجة 1-5 mPa·s
     }
 
     [Header("SPH Physics — فيزياء السائل")]
@@ -132,31 +139,82 @@ public class PaintSimulation : MonoBehaviour
     }
 
     // ════════════════════════════════════════════════════════════════
+    //  ApplyPaintType — معاملات فيزيائية واقعية لكل نوع طلاء
+    //
+    //  SIGMA  = اللزوجة (كبير = أبطأ وأكثر تماسكاً)
+    //  K      = صلابة الضغط (يحدد مقاومة الضغط)
+    //  REST_DENSITY = كثافة الراحة (كبير = أكثف)
+    //  gravityScale = تأثير الجاذبية على السائل داخل الدلو
+    //  bucketInfluence = مدى استجابة السائل لتسارع الدلو
+    //  MAX_VEL = أقصى سرعة للجسيمات
+    //  DAMPING = معامل التخميد (قريب من 1 = يحفظ الزخم أطول)
+    // ════════════════════════════════════════════════════════════════
     void ApplyPaintType()
     {
         switch (paintType)
         {
             case PaintType.Watercolor:
+                // مائي خفيف — لزوجة منخفضة جداً، يتدفق بحرية كاملة
+                // في الواقع: يتمدد على السطح بسرعة ويرسم خطوطاً شفافة
                 K = 0.0002f; K_NEAR = 0.002f; REST_DENSITY = 3f;
-                SIGMA = 0.05f; gravityScale = 0.8f; bucketInfluence = 0.5f; MAX_VEL = 5f;
+                SIGMA = 0.04f; gravityScale = 0.9f; bucketInfluence = 0.6f;
+                MAX_VEL = 5f; DAMPING = 0.988f;
                 break;
-            case PaintType.Normal:
-                K = 0.0001f; K_NEAR = 0.001f; REST_DENSITY = 4f;
-                SIGMA = 0.2f; gravityScale = 0.6f; bucketInfluence = 0.35f; MAX_VEL = 4f;
-                break;
+
             case PaintType.Acrylic:
-                K = 0.00008f; K_NEAR = 0.0008f; REST_DENSITY = 5f;
-                SIGMA = 0.5f; gravityScale = 0.5f; bucketInfluence = 0.25f; MAX_VEL = 3f;
+                // أكريليك — لزوجة متوسطة، الأكثر استخداماً في الدلو المتأرجح
+                // في الواقع: يتدفق جيداً ويجف سريعاً، يعطي خطوطاً واضحة
+                K = 0.00009f; K_NEAR = 0.0009f; REST_DENSITY = 4.5f;
+                SIGMA = 0.3f; gravityScale = 0.6f; bucketInfluence = 0.3f;
+                MAX_VEL = 3.5f; DAMPING = 0.991f;
                 break;
-            case PaintType.Oil:
-                K = 0.00005f; K_NEAR = 0.0005f; REST_DENSITY = 7f;
-                SIGMA = 0.8f; gravityScale = 0.4f; bucketInfluence = 0.15f;
-                MAX_VEL = 1.5f; DAMPING = 0.995f;
+
+            case PaintType.OilPaint:
+                // زيتي — ثقيل وبطيء، لزوجة عالية
+                // في الواقع: يسيل ببطء شديد، يعطي خطوطاً سميكة وجمالية
+                K = 0.00005f; K_NEAR = 0.0005f; REST_DENSITY = 6.5f;
+                SIGMA = 0.85f; gravityScale = 0.4f; bucketInfluence = 0.12f;
+                MAX_VEL = 1.5f; DAMPING = 0.996f;
                 break;
-            case PaintType.Honey:
-                K = 0.00003f; K_NEAR = 0.0003f; REST_DENSITY = 9f;
-                SIGMA = 1.5f; gravityScale = 0.3f; bucketInfluence = 0.08f;
-                MAX_VEL = 0.8f; DAMPING = 0.998f;
+
+            case PaintType.Tempera:
+                // تيمبيرا — بين المائي والأكريليك، أكثف من المائي وأخف من الأكريليك
+                // في الواقع: يتدفق بشكل منتظم، يُستخدم كثيراً في الفن التعليمي
+                K = 0.00015f; K_NEAR = 0.0015f; REST_DENSITY = 3.8f;
+                SIGMA = 0.15f; gravityScale = 0.75f; bucketInfluence = 0.45f;
+                MAX_VEL = 4f; DAMPING = 0.990f;
+                break;
+
+            case PaintType.Gouache:
+                // غواش — معتم وكثيف، يجف ليكون مطفياً
+                // في الواقع: أكثف من الأكريليك، يعطي ألواناً كثيفة وغير شفافة
+                K = 0.00007f; K_NEAR = 0.0007f; REST_DENSITY = 5.5f;
+                SIGMA = 0.55f; gravityScale = 0.5f; bucketInfluence = 0.2f;
+                MAX_VEL = 2.5f; DAMPING = 0.993f;
+                break;
+
+            case PaintType.Latex:
+                // لاتكس جداري — سميك جداً ومطاطي، يُستخدم لطلاء الجدران
+                // في الواقع: لزوجة عالية جداً، يسيل ببطء شديد ويترك طبقة سميكة
+                K = 0.00004f; K_NEAR = 0.0004f; REST_DENSITY = 7.5f;
+                SIGMA = 1.1f; gravityScale = 0.35f; bucketInfluence = 0.1f;
+                MAX_VEL = 1.2f; DAMPING = 0.997f;
+                break;
+
+            case PaintType.Enamel:
+                // مينا لامع — سائل لزج يعطي سطحاً لامعاً جداً
+                // في الواقع: يسيل ببطء كالعسل، يترك طبقة ملساء لامعة
+                K = 0.00004f; K_NEAR = 0.0004f; REST_DENSITY = 7f;
+                SIGMA = 1.0f; gravityScale = 0.38f; bucketInfluence = 0.11f;
+                MAX_VEL = 1.3f; DAMPING = 0.996f;
+                break;
+
+            case PaintType.Ink:
+                // حبر — رقيق جداً كالماء تقريباً، لزوجة منخفضة جداً
+                // في الواقع: أرق من الطلاء المائي، يتدفق بأقصى سرعة ويصنع خطوطاً دقيقة
+                K = 0.00025f; K_NEAR = 0.0025f; REST_DENSITY = 2.5f;
+                SIGMA = 0.02f; gravityScale = 0.95f; bucketInfluence = 0.7f;
+                MAX_VEL = 6f; DAMPING = 0.985f;
                 break;
         }
     }
@@ -538,17 +596,41 @@ public class PaintSimulation : MonoBehaviour
         int cx = Mathf.RoundToInt(Mathf.Clamp01(lp.x + 0.5f) * canvasWidth);
         int cy = Mathf.RoundToInt(Mathf.Clamp01(lp.z + 0.5f) * canvasHeight);
 
-        float spreadMult = paintType == PaintType.Watercolor ? 2f :
-                           paintType == PaintType.Oil ? 0.6f : 1f;
+        // انتشار البقعة حسب نوع الطلاء — الرقيق ينتشر أكثر
+        float spreadMult = paintType switch
+        {
+            PaintType.Ink => 3.0f,  // حبر — ينتشر أكثر من أي شيء
+            PaintType.Watercolor => 2.5f,  // مائي — ينتشر كثيراً
+            PaintType.Tempera => 1.5f,  // تيمبيرا — انتشار متوسط
+            PaintType.Acrylic => 1.0f,  // أكريليك — طبيعي
+            PaintType.Gouache => 0.8f,  // غواش — أقل انتشاراً
+            PaintType.OilPaint => 0.6f,  // زيتي — بقعة صغيرة سميكة
+            PaintType.Enamel => 0.5f,  // مينا — بقعة صغيرة لامعة
+            PaintType.Latex => 0.4f,  // لاتكس — بقعة سميكة محدودة
+            _ => 1.0f
+        };
+
         int r = Mathf.RoundToInt(brushSize * Mathf.Clamp(speed * 0.2f, 0.5f, 3f) * spreadMult);
         FillCircle(cx, cy, r, paintColor);
 
-        int splats = paintType == PaintType.Watercolor ? 6 :
-                     paintType == PaintType.Oil ? 1 : 3;
+        // عدد بقع التناثر حسب نوع الطلاء
+        int splats = paintType switch
+        {
+            PaintType.Ink => 8,  // حبر — تناثر كثير
+            PaintType.Watercolor => 6,  // مائي — تناثر كثير
+            PaintType.Tempera => 4,  // تيمبيرا — تناثر متوسط
+            PaintType.Acrylic => 3,  // أكريليك — طبيعي
+            PaintType.Gouache => 2,  // غواش — تناثر قليل
+            PaintType.OilPaint => 1,  // زيتي — بالكاد يتناثر
+            PaintType.Enamel => 1,  // مينا — بالكاد يتناثر
+            PaintType.Latex => 0,  // لاتكس — لا تناثر، يسقط ككتلة
+            _ => 3
+        };
+
         for (int s = 0; s < splats; s++)
         {
             float a = Random.Range(0f, Mathf.PI * 2f);
-            int d = Random.Range(r, r + (int)(20f / Mathf.Max(SIGMA, 0.1f)));
+            int d = Random.Range(r, r + (int)(20f / Mathf.Max(SIGMA, 0.05f)));
             FillCircle(cx + (int)(Mathf.Cos(a) * d),
                        cy + (int)(Mathf.Sin(a) * d),
                        Mathf.Max(r / 3, 1), paintColor * 0.7f);
@@ -624,7 +706,19 @@ public class PaintSimulation : MonoBehaviour
         if (paintHudStyle == null) InitPaintHudStyle();
         int x = 360, y = 10, lh = 18, lines = 3;
         GUI.DrawTexture(new Rect(x - 4, y - 3, 220, lh * lines + 6), paintHudBg);
-        GUI.Label(new Rect(x, y, 230, lh), $"Type     : {paintType}", paintHudStyle);
+        string paintName = paintType switch
+        {
+            PaintType.Watercolor => "مائي خفيف",
+            PaintType.Acrylic => "أكريليك",
+            PaintType.OilPaint => "زيتي",
+            PaintType.Tempera => "تيمبيرا",
+            PaintType.Gouache => "غواش",
+            PaintType.Latex => "لاتكس جداري",
+            PaintType.Enamel => "مينا لامع",
+            PaintType.Ink => "حبر",
+            _ => paintType.ToString()
+        };
+        GUI.Label(new Rect(x, y, 230, lh), $"Type     : {paintName}", paintHudStyle);
         GUI.Label(new Rect(x, y + lh, 230, lh), $"Inside   : {InsideCount()} / {maxParticles}", paintHudStyle);
         GUI.Label(new Rect(x, y + lh * 2, 230, lh), $"Tilt(θ)  : {(pendulum != null ? pendulum.theta * Mathf.Rad2Deg : Vector3.Angle(BucketUp, Vector3.up)):F1}°", paintHudStyle);
     }
