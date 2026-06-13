@@ -133,6 +133,7 @@ public class SphericalPendulum : MonoBehaviour
     int zeroCrossCount = 0;
     float prevThetaVel;
     bool simRunning = true;
+    bool returningToRest = false;  // لما يوقف يرجع ناعم للوضع الطبيعي
     string stopReason = "—";
     float energyAtStart = 0f;
     float maxEnergyDrift = 0f;
@@ -166,6 +167,28 @@ public class SphericalPendulum : MonoBehaviour
 
         Debug.Log($"[Pendulum v2.6] pivot={pivotPosition} | g={gravity} | " +
                   $"E0={energyAtStart:F3} J | T={TheoreticalPeriod():F3} s");
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    void Update()
+    {
+        // لما البندول يوقف، يرجع الدلو للوضع الطبيعي بشكل ناعم
+        if (!returningToRest) return;
+
+        float speed = 2.5f; // سرعة الرجوع — رفعها لو بدك أسرع
+        theta = Mathf.Lerp(theta, 0f, Time.deltaTime * speed);
+        phi = Mathf.Lerp(phi, 0f, Time.deltaTime * speed);
+
+        UpdatePosition();
+
+        // لما وصل قريب من الصفر، وقف
+        if (theta < 0.002f)
+        {
+            theta = 0f;
+            phi = 0f;
+            returningToRest = false;
+            UpdatePosition();
+        }
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -506,6 +529,7 @@ public class SphericalPendulum : MonoBehaviour
     void StopSimulation(string reason)
     {
         simRunning = false;
+        returningToRest = true;
         stopReason = reason;
         Debug.Log($"[Pendulum] Finished — Swings:{zeroCrossCount / 2} | {reason}");
         Debug.Log($"[Pendulum] Max Energy Drift: {maxEnergyDrift:F4}%");
@@ -746,8 +770,8 @@ public class SphericalPendulum : MonoBehaviour
             ResetSimulation();
     }
 }
-    // ════════════════════════════════════════════════════════════════════
-    public struct Vector6
+// ════════════════════════════════════════════════════════════════════
+public struct Vector6
 {
     public float a, b, c, d, e, f;
 
