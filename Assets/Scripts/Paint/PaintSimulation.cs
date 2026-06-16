@@ -41,7 +41,7 @@ public class PaintSimulation : MonoBehaviour
     }
 
     [Header("SPH Physics — فيزياء السائل")]
-    [Range(100, 5000)]
+    [Range(100, 10000)]
     public int maxParticles = 500;
     [Range(0.08f, 0.25f)]
     public float R = 0.18f;
@@ -120,7 +120,7 @@ public class PaintSimulation : MonoBehaviour
     //  [OPT-1] Uniform Grid — arrays ثابتة بدل Dictionary
     //  كل خلية فيها أقصى عدد جيران محدد مسبقاً
     // ══════════════════════════════════════════════════════════════
-    const int MAX_PER_CELL = 64; // أقصى جزيء بكل خلية — رفعناها لمنع رمي الجزيئات
+    const int MAX_PER_CELL = 64; // رجعناها لـ 64 — 128 كانت تقل الأداء كثير حتى مع 5000
     const int MAX_NEIGHBORS = 64; // أقصى جار لكل جزيء
 
     // الـ grid نفسه
@@ -153,14 +153,13 @@ public class PaintSimulation : MonoBehaviour
     // frame counter للـ sleep system
     int frameCount = 0;
 
-    public Vector3 BucketCenter => bucketTransform.position
-                                 + bucketTransform.TransformDirection(bucketCenterOffset);
-    Vector3 BucketUp => bucketTransform.TransformDirection(Vector3.up).normalized;
-    Vector3 BucketRight => bucketTransform.TransformDirection(Vector3.right).normalized;
-    Vector3 BucketForward => bucketTransform.TransformDirection(Vector3.forward).normalized;
+    public Vector3 BucketCenter { get { return bucketTransform.position + bucketTransform.TransformDirection(bucketCenterOffset); } }
+    Vector3 BucketUp { get { return bucketTransform.TransformDirection(Vector3.up).normalized; } }
+    Vector3 BucketRight { get { return bucketTransform.TransformDirection(Vector3.right).normalized; } }
+    Vector3 BucketForward { get { return bucketTransform.TransformDirection(Vector3.forward).normalized; } }
 
-    public Vector3 HolePosition => BucketCenter - BucketUp * (bucketWorldHeight * 0.5f);
-    public Vector3 TopPosition => BucketCenter + BucketUp * (bucketWorldHeight * 0.5f);
+    public Vector3 HolePosition { get { return BucketCenter - BucketUp * (bucketWorldHeight * 0.5f); } }
+    public Vector3 TopPosition { get { return BucketCenter + BucketUp * (bucketWorldHeight * 0.5f); } }
 
     // ════════════════════════════════════════════════════════════════
     void Start()
@@ -173,7 +172,7 @@ public class PaintSimulation : MonoBehaviour
         InitVisualPS();
         SpawnParticles();
         spawnDone = true;
-        Debug.Log($"[PaintV8.0] Type={paintType} | Particles={maxParticles}");
+        Debug.Log("[PaintV9] Type=" + paintType + " | Particles=" + maxParticles);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -202,7 +201,7 @@ public class PaintSimulation : MonoBehaviour
         gridCount = new int[totalCells];
         gridParticles = new int[totalCells * MAX_PER_CELL];
 
-        Debug.Log($"[PaintV8.0] Grid: {gridSizeX}x{gridSizeY}x{gridSizeZ} = {totalCells} cells");
+        Debug.Log("[PaintV9] Grid: " + gridSizeX + "x" + gridSizeY + "x" + gridSizeZ + " = " + totalCells + " cells");
     }
 
     void InitNeighborArrays()
@@ -343,18 +342,18 @@ public class PaintSimulation : MonoBehaviour
         float tiltDeg = pendulum != null ? pendulum.theta * Mathf.Rad2Deg : 0f;
 
         Debug.Log(
-            $"[Paint F={frameCount}] " +
-            $"Inside={inside} Falling={falling} OnCanvas={onCanvas} | " +
-            $"Active={active} Sleeping={sleeping} | " +
-            $"AvgNeighbors={avgNeighbors} AvgVel={avgVel:F2} | " +
-            $"Tilt={tiltDeg:F1}deg BucketPos={BucketCenter:F2}"
+            "[Paint F=" + frameCount + "] " +
+            "Inside=" + inside + " Falling=" + falling + " OnCanvas=" + onCanvas + " | " +
+            "Active=" + active + " Sleeping=" + sleeping + " | " +
+            "AvgNeighbors=" + avgNeighbors + " AvgVel=" + avgVel.ToString("F2") + " | " +
+            "Tilt=" + tiltDeg.ToString("F1") + "deg BucketPos=" + BucketCenter.ToString("F2")
         );
 
         if (inside == 0 && falling == 0)
             Debug.LogWarning("[Paint] كل الجزيئات على اللوحة — الدلو فاضي!");
 
         if (inside < particleCount * 0.1f && frameCount < 300)
-            Debug.LogWarning($"[Paint] تسرب! Inside={inside}/{particleCount} — تحقق من bucketWorldRadius وbucketCenterOffset");
+            Debug.LogWarning("[Paint] تسرب! Inside=" + inside + "/" + particleCount + " - تحقق من bucketWorldRadius وbucketCenterOffset");
     }
 
     void Update()
@@ -728,20 +727,21 @@ public class PaintSimulation : MonoBehaviour
     }
 
     // ════════════════════════════════════════════════════════════════
-    //  SpawnExitParticle — [FIX] يختار أقرب جزيء للفتحة
-    //  بدل الاختيار العشوائي — هاد يعطي واقعية بصرية أكبر بكثير
-    //  لأن السائل فعلاً يخرج من المنطقة القريبة من الفتحة
+    //  SpawnExitParticle — يفحص 20 جسيم عشوائي بدل كل الجسيمات
+    //  هاد يمنع التعليق مع 5000 جسيم (كان يفحص الكل كل مرة)
     // ════════════════════════════════════════════════════════════════
     public void SpawnExitParticle(bool fromTop)
     {
+        if (particleCount == 0) return;
         Vector3 exitPoint = fromTop ? TopPosition : HolePosition;
 
-        // ابحث عن أقرب جزيء Inside للفتحة
         int bestIdx = -1;
         float bestDist = float.MaxValue;
+        int foundCount = 0;
 
-        for (int i = 0; i < particleCount; i++)
+        for (int attempt = 0; attempt < 60 && foundCount < 20; attempt++)
         {
+            int i = Random.Range(0, particleCount);
             if (pts[i].state != INSIDE) continue;
 
             float d = (pts[i].pos - exitPoint).sqrMagnitude;
@@ -750,6 +750,7 @@ public class PaintSimulation : MonoBehaviour
                 bestDist = d;
                 bestIdx = i;
             }
+            foundCount++;
         }
 
         if (bestIdx < 0) return; // ما في جزيئات
@@ -822,7 +823,7 @@ public class PaintSimulation : MonoBehaviour
                 state = INSIDE
             };
         }
-        Debug.Log($"[PaintV8.0] Spawned {particleCount} particles");
+        Debug.Log("[PaintV9] Spawned " + particleCount + " particles");
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -846,10 +847,10 @@ public class PaintSimulation : MonoBehaviour
 
         var ren = visualPS.GetComponent<ParticleSystemRenderer>();
         ren.renderMode = ParticleSystemRenderMode.Billboard;
-        var mat = new Material(
-            Shader.Find("Particles/Standard Unlit") ??
-            Shader.Find("Sprites/Default") ??
-            Shader.Find("Unlit/Color"));
+        Shader sh = Shader.Find("Particles/Standard Unlit");
+        if (sh == null) sh = Shader.Find("Sprites/Default");
+        if (sh == null) sh = Shader.Find("Unlit/Color");
+        var mat = new Material(sh);
         ren.material = mat;
         ren.material.color = paintColor;
 
@@ -937,34 +938,29 @@ public class PaintSimulation : MonoBehaviour
         int cx = Mathf.RoundToInt(Mathf.Clamp01(lp.x + 0.5f) * canvasWidth);
         int cy = Mathf.RoundToInt(Mathf.Clamp01(lp.z + 0.5f) * canvasHeight);
 
-        float spreadMult = paintType switch
-        {
-            PaintType.Ink => 3.0f,
-            PaintType.Watercolor => 2.5f,
-            PaintType.Tempera => 1.5f,
-            PaintType.Acrylic => 1.0f,
-            PaintType.Gouache => 0.8f,
-            PaintType.OilPaint => 0.6f,
-            PaintType.Enamel => 0.5f,
-            PaintType.Latex => 0.4f,
-            _ => 1.0f
-        };
+        float spreadMult;
+        if (paintType == PaintType.Ink) spreadMult = 3.0f;
+        else if (paintType == PaintType.Watercolor) spreadMult = 2.5f;
+        else if (paintType == PaintType.Tempera) spreadMult = 1.5f;
+        else if (paintType == PaintType.Acrylic) spreadMult = 1.0f;
+        else if (paintType == PaintType.Gouache) spreadMult = 0.8f;
+        else if (paintType == PaintType.OilPaint) spreadMult = 0.6f;
+        else if (paintType == PaintType.Enamel) spreadMult = 0.5f;
+        else if (paintType == PaintType.Latex) spreadMult = 0.4f;
+        else spreadMult = 1.0f;
 
         int r = Mathf.RoundToInt(brushSize * Mathf.Clamp(speed * 0.2f, 0.5f, 3f) * spreadMult);
         FillCircle(cx, cy, r, paintColor);
 
-        int splats = paintType switch
-        {
-            PaintType.Ink => 8,
-            PaintType.Watercolor => 6,
-            PaintType.Tempera => 4,
-            PaintType.Acrylic => 3,
-            PaintType.Gouache => 2,
-            PaintType.OilPaint => 1,
-            PaintType.Enamel => 1,
-            PaintType.Latex => 0,
-            _ => 3
-        };
+        int splats;
+        if (paintType == PaintType.Ink) splats = 8;
+        else if (paintType == PaintType.Watercolor) splats = 6;
+        else if (paintType == PaintType.Tempera) splats = 4;
+        else if (paintType == PaintType.Acrylic) splats = 3;
+        else if (paintType == PaintType.Gouache) splats = 2;
+        else if (paintType == PaintType.OilPaint) splats = 1;
+        else if (paintType == PaintType.Enamel) splats = 1;
+        else splats = 0;
 
         for (int s = 0; s < splats; s++)
         {
@@ -991,6 +987,100 @@ public class PaintSimulation : MonoBehaviour
     }
 
     // ════════════════════════════════════════════════════════════════
+    //  [TRAIL] نظام المسار المتصل — يحول النقط لخطوط متصلة
+    //  بدل كل جسيم يرسم دايرة لحاله، بنرسم خط بين نقطتين متتاليتين
+    //  من موقع خروج الطلاء — هيك بيظهر المسار اللولبي الحقيقي
+    // ════════════════════════════════════════════════════════════════
+    Vector3 lastTrailPoint;
+    bool hasLastTrailPoint = false;
+
+    // يرسم خط بين نقطتين على اللوحة (بالخطوات — مثل قلم رصاص يمشي)
+    void DrawLineOnCanvas(Vector3 fromWorld, Vector3 toWorld, int radius, Color c)
+    {
+        if (canvasTransform == null) return;
+
+        Vector3 lpA = canvasTransform.InverseTransformPoint(fromWorld);
+        Vector3 lpB = canvasTransform.InverseTransformPoint(toWorld);
+
+        int ax = Mathf.RoundToInt(Mathf.Clamp01(lpA.x + 0.5f) * canvasWidth);
+        int ay = Mathf.RoundToInt(Mathf.Clamp01(lpA.z + 0.5f) * canvasHeight);
+        int bx = Mathf.RoundToInt(Mathf.Clamp01(lpB.x + 0.5f) * canvasWidth);
+        int by = Mathf.RoundToInt(Mathf.Clamp01(lpB.z + 0.5f) * canvasHeight);
+
+        int dx = bx - ax;
+        int dy = by - ay;
+        int steps = Mathf.Max(Mathf.Abs(dx), Mathf.Abs(dy), 1);
+        steps = Mathf.Min(steps, 300); // حماية من قفزات كبيرة
+
+        for (int s = 0; s <= steps; s++)
+        {
+            float t = (float)s / steps;
+            int px = Mathf.RoundToInt(Mathf.Lerp(ax, bx, t));
+            int py = Mathf.RoundToInt(Mathf.Lerp(ay, by, t));
+            FillCircle(px, py, radius, c);
+        }
+        canvasDirty = true;
+    }
+
+    // يحول موقع الفتحة لنقطة على اللوحة — إسقاط عمودي مباشر
+    // (يعكس الموقع الأفقي للدلو فوق اللوحة — هاد اللي بيعطي الشكل اللولبي)
+    public Vector3 ProjectOntoCanvas(Vector3 worldPos)
+    {
+        if (canvasTransform == null) return worldPos;
+        Vector3 lp = canvasTransform.InverseTransformPoint(worldPos);
+
+        if (canvasIsHorizontal)
+            lp.y = 0f; // اسقاط عمودي — نفس X,Z بس على ارتفاع اللوحة
+        else
+            lp.z = 0f; // للوحة العمودية
+
+        return canvasTransform.TransformPoint(lp);
+    }
+
+    // هل النقطة فوق اللوحة فعلاً (مش خارج حدودها)؟
+    public bool IsPointOnCanvas(Vector3 worldPos)
+    {
+        if (canvasTransform == null) return false;
+        Vector3 lp = canvasTransform.InverseTransformPoint(worldPos);
+        return Mathf.Abs(lp.x) <= 0.5f && Mathf.Abs(lp.z) <= 0.5f;
+    }
+
+    // يضيف نقطة جديدة للمسار ويرسم خط من النقطة السابقة لهاي
+    // إذا النقطة برة اللوحة — يرفع القلم (pen up) بدون رسم
+    public void UpdateTrail(Vector3 pointWorld, float thickness)
+    {
+        if (canvasTransform == null) return;
+
+        if (!IsPointOnCanvas(pointWorld))
+        {
+            hasLastTrailPoint = false; // pen up — برة اللوحة
+            return;
+        }
+
+        int r = Mathf.Max(1, Mathf.RoundToInt(thickness));
+
+        if (hasLastTrailPoint)
+            DrawLineOnCanvas(lastTrailPoint, pointWorld, r, paintColor);
+        else
+        {
+            Vector3 lp = canvasTransform.InverseTransformPoint(pointWorld);
+            int cx = Mathf.RoundToInt(Mathf.Clamp01(lp.x + 0.5f) * canvasWidth);
+            int cy = Mathf.RoundToInt(Mathf.Clamp01(lp.z + 0.5f) * canvasHeight);
+            FillCircle(cx, cy, r, paintColor);
+        }
+
+        lastTrailPoint = pointWorld;
+        hasLastTrailPoint = true;
+        canvasDirty = true;
+    }
+
+    // يقطع المسار — يستدعى لما يتوقف التدفق (pen up)
+    public void BreakTrail()
+    {
+        hasLastTrailPoint = false;
+    }
+
+    // ════════════════════════════════════════════════════════════════
     public void RefillBucket()
     {
         for (int i = 0; i < particleCount; i++)
@@ -1007,10 +1097,13 @@ public class PaintSimulation : MonoBehaviour
         for (int i = 0; i < canvasPx.Length; i++) canvasPx[i] = bg;
         canvasTex.SetPixels(canvasPx);
         canvasTex.Apply();
+        BreakTrail();
     }
 
     public void SaveCanvas(string path = "PaintResult.png")
-        => System.IO.File.WriteAllBytes(path, canvasTex.EncodeToPNG());
+    {
+        System.IO.File.WriteAllBytes(path, canvasTex.EncodeToPNG());
+    }
 
     public int InsideCount()
     {
@@ -1029,6 +1122,56 @@ public class PaintSimulation : MonoBehaviour
     }
 
     // ════════════════════════════════════════════════════════════════
+    //  [REAL SPH] GetLiquidHeightAtHole — ارتفاع السائل الفعلي فوق نقطة معينة
+    //  بدل الاعتماد على fillRatio (افتراض مستوى أفقي ثابت)، هون بنحسب
+    //  فعلياً كم جسيم Inside موجود ضمن عمود عمودي فوق نقطة الفتحة.
+    //  هذا يعكس السلوك الحقيقي: لو الدلو مايل واتجمع السائل عند الفتحة،
+    //  بيطلع ارتفاع فعلي حتى لو fillRatio الكلي قليل. والعكس صحيح.
+    // ════════════════════════════════════════════════════════════════
+    public float GetLiquidHeightAtHole(Vector3 holeWorldPos, float sampleRadius)
+    {
+        if (particleCount == 0) return 0f;
+
+        Vector3 up = BucketUp;
+        Vector3 center = BucketCenter;
+
+        // أعلى نقطة لجسيم داخل العمود العمودي فوق الفتحة (ضمن sampleRadius أفقياً)
+        float highestVert = float.MinValue;
+        bool found = false;
+
+        for (int i = 0; i < particleCount; i++)
+        {
+            if (pts[i].state != INSIDE) continue;
+
+            Vector3 offset = pts[i].pos - holeWorldPos;
+
+            // المسافة الأفقية (عمودي على محور الدلو) بين الجسيم والفتحة
+            float vertFromHole = Vector3.Dot(offset, up);
+            Vector3 horizOffset = offset - up * vertFromHole;
+
+            if (horizOffset.magnitude > sampleRadius) continue; // برة نطاق العمود
+
+            // ارتفاع الجسيم بالنسبة لمركز الدلو على محور BucketUp
+            float vertFromCenter = Vector3.Dot(pts[i].pos - center, up);
+
+            if (!found || vertFromCenter > highestVert)
+            {
+                highestVert = vertFromCenter;
+                found = true;
+            }
+        }
+
+        if (!found) return 0f;
+
+        // ارتفاع الفتحة نفسها بالنسبة لمركز الدلو
+        float holeVertFromCenter = Vector3.Dot(holeWorldPos - center, up);
+
+        // الفرق = ارتفاع السائل الفعلي فوق الفتحة
+        float height = highestVert - holeVertFromCenter;
+        return Mathf.Max(height, 0f);
+    }
+
+    // ════════════════════════════════════════════════════════════════
     GUIStyle paintHudStyle;
     Texture2D paintHudBg;
 
@@ -1037,11 +1180,9 @@ public class PaintSimulation : MonoBehaviour
         paintHudBg = new Texture2D(1, 1);
         paintHudBg.SetPixel(0, 0, new Color(0f, 0f, 0f, 0.6f));
         paintHudBg.Apply();
-        paintHudStyle = new GUIStyle
-        {
-            fontSize = 11,
-            padding = new RectOffset(4, 4, 2, 2)
-        };
+        paintHudStyle = new GUIStyle();
+        paintHudStyle.fontSize = 11;
+        paintHudStyle.padding = new RectOffset(4, 4, 2, 2);
         paintHudStyle.normal.textColor = Color.white;
     }
 
@@ -1051,30 +1192,29 @@ public class PaintSimulation : MonoBehaviour
         int x = 360, y = 10, lh = 18, lines = 6;
         GUI.DrawTexture(new Rect(x - 4, y - 3, 220, lh * lines + 6), paintHudBg);
 
-        string paintName = paintType switch
-        {
-            PaintType.Watercolor => "مائي خفيف",
-            PaintType.Acrylic => "أكريليك",
-            PaintType.OilPaint => "زيتي",
-            PaintType.Tempera => "تيمبيرا",
-            PaintType.Gouache => "غواش",
-            PaintType.Latex => "لاتكس جداري",
-            PaintType.Enamel => "مينا لامع",
-            PaintType.Ink => "حبر",
-            _ => paintType.ToString()
-        };
+        string paintName;
+        if (paintType == PaintType.Watercolor) paintName = "مائي خفيف";
+        else if (paintType == PaintType.Acrylic) paintName = "أكريليك";
+        else if (paintType == PaintType.OilPaint) paintName = "زيتي";
+        else if (paintType == PaintType.Tempera) paintName = "تيمبيرا";
+        else if (paintType == PaintType.Gouache) paintName = "غواش";
+        else if (paintType == PaintType.Latex) paintName = "لاتكس جداري";
+        else if (paintType == PaintType.Enamel) paintName = "مينا لامع";
+        else if (paintType == PaintType.Ink) paintName = "حبر";
+        else paintName = paintType.ToString();
 
         // عدد الجزيئات النايمة
         int sleeping = 0;
         for (int i = 0; i < particleCount; i++)
             if (pts[i].state == INSIDE && pts[i].sleepTimer > 0) sleeping++;
 
-        GUI.Label(new Rect(x, y, 230, lh), $"Type    : {paintName}", paintHudStyle);
-        GUI.Label(new Rect(x, y + lh, 230, lh), $"Inside  : {InsideCount()} / {maxParticles}", paintHudStyle);
-        GUI.Label(new Rect(x, y + lh * 2, 230, lh), $"Falling : {FallingCount()}", paintHudStyle);
-        GUI.Label(new Rect(x, y + lh * 3, 230, lh), $"Sleeping: {sleeping}", paintHudStyle);
-        GUI.Label(new Rect(x, y + lh * 4, 230, lh), $"Tilt(θ) : {(pendulum != null ? pendulum.theta * Mathf.Rad2Deg : 0f):F1}°", paintHudStyle);
-        GUI.Label(new Rect(x, y + lh * 5, 230, lh), $"SIGMA   : {SIGMA:F3}", paintHudStyle);
+        GUI.Label(new Rect(x, y, 230, lh), "Type    : " + paintName, paintHudStyle);
+        GUI.Label(new Rect(x, y + lh, 230, lh), "Inside  : " + InsideCount() + " / " + maxParticles, paintHudStyle);
+        GUI.Label(new Rect(x, y + lh * 2, 230, lh), "Falling : " + FallingCount(), paintHudStyle);
+        GUI.Label(new Rect(x, y + lh * 3, 230, lh), "Sleeping: " + sleeping, paintHudStyle);
+        float tiltShow = pendulum != null ? pendulum.theta * Mathf.Rad2Deg : 0f;
+        GUI.Label(new Rect(x, y + lh * 4, 230, lh), "Tilt    : " + tiltShow.ToString("F1") + " deg", paintHudStyle);
+        GUI.Label(new Rect(x, y + lh * 5, 230, lh), "SIGMA   : " + SIGMA.ToString("F3"), paintHudStyle);
     }
 
     void OnDrawGizmos()

@@ -555,6 +555,7 @@ GameObject:
   m_Component:
   - component: {fileID: 967485739}
   - component: {fileID: 967485738}
+  - component: {fileID: 967485740}
   m_Layer: 0
   m_Name: PaintManager
   m_TagString: Untagged
@@ -578,12 +579,14 @@ MonoBehaviour:
   bucketTransform: {fileID: 1410675181}
   canvasTransform: {fileID: 829268569}
   canvasRenderer: {fileID: 829268567}
-  paintType: 0
-  maxParticles: 250
+  paintType: 1
+  maxParticles: 10000
   R: 0.097
   G: 9.81
   DAMPING: 0.98
   MAX_VEL: 4
+  sleepThreshold: 0.0001
+  sleepFrames: 3
   enableSurfaceTension: 1
   surfaceTension: 0.5
   temperature: 25
@@ -597,9 +600,7 @@ MonoBehaviour:
   bucketWorldRadius: 0.18
   bucketWorldHeight: 0.35
   bucketCenterOffset: {x: 0, y: 0, z: 0.7}
-  visualParticleCount: 8000
   visualParticleSize: 0.05
-  visualNoiseStrength: 0.02
   paintColor: {r: 0.9, g: 0.1, b: 0.1, a: 1}
   paintColorDark: {r: 0.6, g: 0.05, b: 0.05, a: 1}
   canvasWidth: 512
@@ -622,6 +623,32 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 90, y: 0, z: 0}
+--- !u!114 &967485740
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 967485737}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 73cc0210429d0f2468e04be413e8a108, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BucketHole
+  pendulum: {fileID: 1206993304}
+  paintSim: {fileID: 967485738}
+  holeDiameter: 0.05
+  spillAngleThreshold: 30
+  overflowAngleThreshold: 80
+  particlesPerSecond: 5
+  overflowParticlesPerSecond: 3
+  velocityBoostFactor: 1.5
+  enableTorricelli: 1
+  enableTrail: 1
+  trailMinThickness: 1.5
+  trailMaxThickness: 8
+  showLog: 1
+  holeOpen: 1
 --- !u!1001 &1006875360
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -656,11 +683,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 14accb75f67b5d34c9b5bc8b9ce10f5a, type: 3}
       propertyPath: m_LocalRotation.w
-      value: 0.7071068
+      value: 0.7009094
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 14accb75f67b5d34c9b5bc8b9ce10f5a, type: 3}
       propertyPath: m_LocalRotation.x
-      value: 0.7071068
+      value: 0.7132504
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 14accb75f67b5d34c9b5bc8b9ce10f5a, type: 3}
       propertyPath: m_LocalRotation.y
@@ -672,7 +699,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 14accb75f67b5d34c9b5bc8b9ce10f5a, type: 3}
       propertyPath: m_LocalEulerAnglesHint.x
-      value: 90
+      value: 91
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 14accb75f67b5d34c9b5bc8b9ce10f5a, type: 3}
       propertyPath: m_LocalEulerAnglesHint.y
@@ -778,7 +805,7 @@ MonoBehaviour:
   jointFriction: 0.02
   humidity: 0.302
   windVelocity: {x: 0, y: 0, z: 0}
-  n_swings: 20
+  n_swings: 25
   floorY: -1
   bounce: 0.3
   timeScale: 1
