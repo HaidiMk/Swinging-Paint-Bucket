@@ -63,7 +63,7 @@ public class PBFSolver : MonoBehaviour
     [Header("Bucket Size — حجم الدلو")]
     public float bucketWorldRadius = 0.25f;
     public float bucketWorldHeight = 0.4f;
-    public Vector3 bucketCenterOffset = new Vector3(0f, -0.15f, 0f);
+    public Vector3 bucketCenterOffset = new Vector3(0f, 0f, -0.15f);
 
     // ══════════════════════════════════════════════════════════════
     [Header("Canvas — اللوحة")]
@@ -174,9 +174,9 @@ public class PBFSolver : MonoBehaviour
     // ══════════════════════════════════════════════════════════════
     public Vector3 BucketCenter => bucketTransform.position
                                  + bucketTransform.TransformDirection(bucketCenterOffset);
-    Vector3 BucketUp => bucketTransform.TransformDirection(Vector3.up).normalized;
+    Vector3 BucketUp => bucketTransform.TransformDirection(-Vector3.forward).normalized;
     Vector3 BucketRight => bucketTransform.TransformDirection(Vector3.right).normalized;
-    Vector3 BucketForward => bucketTransform.TransformDirection(Vector3.forward).normalized;
+    Vector3 BucketForward => bucketTransform.TransformDirection(Vector3.up).normalized;
 
     public Vector3 HolePosition => BucketCenter - BucketUp * (bucketWorldHeight * 0.5f);
     public Vector3 TopPosition => BucketCenter + BucketUp * (bucketWorldHeight * 0.5f);
