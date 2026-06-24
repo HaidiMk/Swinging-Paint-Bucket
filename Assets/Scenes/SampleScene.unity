@@ -554,7 +554,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 967485739}
-  - component: {fileID: 967485738}
+  - component: {fileID: 967485741}
   - component: {fileID: 967485740}
   m_Layer: 0
   m_Name: PaintManager
@@ -563,51 +563,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &967485738
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 967485737}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e52be2db8f6eef44a8efdea78f197259, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::PaintSimulation
-  pendulum: {fileID: 1206993304}
-  bucketTransform: {fileID: 1410675181}
-  canvasTransform: {fileID: 829268569}
-  canvasRenderer: {fileID: 829268567}
-  paintType: 1
-  maxParticles: 10000
-  R: 0.097
-  G: 9.81
-  DAMPING: 0.98
-  MAX_VEL: 4
-  sleepThreshold: 0.0001
-  sleepFrames: 3
-  enableSurfaceTension: 1
-  surfaceTension: 0.5
-  temperature: 25
-  fluidHumidity: 0.5
-  K: 0.00008
-  K_NEAR: 0.0008
-  REST_DENSITY: 3
-  SIGMA: 0.2
-  gravityScale: 0
-  bucketInfluence: 0
-  bucketWorldRadius: 0.18
-  bucketWorldHeight: 0.35
-  bucketCenterOffset: {x: 0, y: 0, z: 0.7}
-  visualParticleSize: 0.05
-  paintColor: {r: 0.9, g: 0.1, b: 0.1, a: 1}
-  paintColorDark: {r: 0.6, g: 0.05, b: 0.05, a: 1}
-  canvasWidth: 512
-  canvasHeight: 512
-  brushSize: 8
-  canvasIsHorizontal: 1
-  showDebugGizmos: 1
 --- !u!4 &967485739
 Transform:
   m_ObjectHideFlags: 0
@@ -636,19 +591,62 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::BucketHole
   pendulum: {fileID: 1206993304}
-  paintSim: {fileID: 967485738}
+  paintSim: {fileID: 967485741}
   holeDiameter: 0.05
-  spillAngleThreshold: 30
+  holeHeightFromBottom: 0
+  spillAngleThreshold: 5
   overflowAngleThreshold: 80
-  particlesPerSecond: 5
+  particlesPerSecond: 3
   overflowParticlesPerSecond: 3
   velocityBoostFactor: 1.5
   enableTorricelli: 1
   enableTrail: 1
-  trailMinThickness: 1.5
-  trailMaxThickness: 8
+  trailMinThickness: 2
+  trailMaxThickness: 3
   showLog: 1
   holeOpen: 1
+--- !u!114 &967485741
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 967485737}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5e74584e139e7cf4180df706430049d5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PBFSolver
+  pendulum: {fileID: 1206993304}
+  bucketTransform: {fileID: 1410675181}
+  canvasTransform: {fileID: 829268569}
+  canvasRenderer: {fileID: 829268567}
+  pbfComputeShader: {fileID: 7200000, guid: d47f37d3181feb347ae1cae2b90d28e1, type: 3}
+  paintType: 1
+  maxParticles: 5000
+  h: 0.18
+  restDensity: 6
+  solverIterations: 3
+  epsilon: 600
+  G: 9.81
+  bucketWorldRadius: 0.1
+  bucketWorldHeight: 0.1
+  bucketCenterOffset: {x: 0, y: 0, z: 0.7}
+  canvasWidth: 1024
+  canvasHeight: 1024
+  canvasIsHorizontal: 1
+  baseBrushSize: 8
+  speedToSizeMultiplier: 0.3
+  splashDroplets: 6
+  splashMaxRadius: 30
+  dropletSizeRatio: 0.3
+  paintColor: {r: 0.9, g: 0.1, b: 0.1, a: 1}
+  paintColorDark: {r: 0.5, g: 0.05, b: 0.05, a: 1}
+  visualParticleSize: 0.015
+  showDebugGizmos: 1
+  gravityScale: 0.6
+  bucketInfluence: 0.3
+  SIGMA: 0.3
 --- !u!1001 &1006875360
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -683,11 +681,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 14accb75f67b5d34c9b5bc8b9ce10f5a, type: 3}
       propertyPath: m_LocalRotation.w
-      value: 0.7009094
+      value: 0.7071068
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 14accb75f67b5d34c9b5bc8b9ce10f5a, type: 3}
       propertyPath: m_LocalRotation.x
-      value: 0.7132504
+      value: 0.7071068
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 14accb75f67b5d34c9b5bc8b9ce10f5a, type: 3}
       propertyPath: m_LocalRotation.y
@@ -699,7 +697,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 14accb75f67b5d34c9b5bc8b9ce10f5a, type: 3}
       propertyPath: m_LocalEulerAnglesHint.x
-      value: 91
+      value: 90
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 14accb75f67b5d34c9b5bc8b9ce10f5a, type: 3}
       propertyPath: m_LocalEulerAnglesHint.y
@@ -794,10 +792,10 @@ MonoBehaviour:
   ropeTwistDamping: 1
   thetaDeg: 30
   phiDeg: 360
-  thetaVel0: 0.9
-  phiVel0: 1.4
-  theta: 10
-  phi: 30
+  thetaVel0: 0
+  phiVel0: 3
+  theta: 60
+  phi: 60
   thetaVel: 0
   phiVel: 0
   gravity: 9.8
@@ -816,7 +814,7 @@ MonoBehaviour:
   mainCamera: {fileID: 330585545}
   cameraOffset: {x: 0, y: 1.5, z: -3}
   cameraSmoothing: 8
-  showTrail: 1
+  showTrail: 0
   trailTime: 20
   trailStartWidth: 0.05
   trailEndWidth: 0.005

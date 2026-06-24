@@ -1,0 +1,421 @@
+﻿// ════════════════════════════════════════════════════════════════════
+//  PBFSolver.compute  v1.0
+//  Position Based Fluids على GPU — RTX 2050
+//
+//  المعمارية:
+//  كل pass = kernel منفصل يشتغل على آلاف threads بالتوازي
+//  Pass 0: PredictPositions  — x* = x + v*dt
+//  Pass 1: BuildGrid         — Spatial Hash على GPU
+//  Pass 2: FindNeighbors     — كل جزيء يبحث عن جيرانه
+//  Pass 3: SolveConstraints  — معادلة PBF الأساسية
+//  Pass 4: UpdateVelocity    — v = (x* - x) / dt
+//  Pass 5: EnforceBoundary   — حدود الدلو
+// ════════════════════════════════════════════════════════════════════
+
+// ── Buffers ──────────────────────────────────────────────────────
+RWStructuredBuffer<float3> positions; // المواقع الحالية
+RWStructuredBuffer<float3> predictedPos; // المواقع المتوقعة x*
+RWStructuredBuffer<float3> velocities; // السرعات
+RWStructuredBuffer<float3> deltaPos; // تصحيح الموقع Δx
+RWStructuredBuffer<float> lambdas; // معامل PBF λ
+RWStructuredBuffer<int> states; // 0=Inside 1=Falling 2=OnCanvas
+RWStructuredBuffer<int> neighborList; // قائمة الجيران
+RWStructuredBuffer<int> neighborCount; // عدد الجيران لكل جزيء
+
+// Spatial Hash Grid
+RWStructuredBuffer<int> gridCount; // عدد الجزيئات في كل خلية
+RWStructuredBuffer<int> gridParticles; // indices الجزيئات في كل خلية
+
+// ── Constants ────────────────────────────────────────────────────
+float dt;
+float h; // نصف قطر التأثير (smoothing length)
+float restDensity; // الكثافة الطبيعية للسائل ρ₀
+float epsilon; // ε لـ CFM (Constraint Force Mixing)
+float gravity;
+float gravityScale;
+float bucketInfluence;
+float3 bucketAccel; // تسارع الدلو
+int particleCount;
+int maxNeighbors; // أقصى عدد جيران لكل جزيء
+
+// Bucket boundaries
+float3 bucketCenter;
+float3 bucketUp;
+float bucketRadius;
+float bucketTop;
+float bucketBottom;
+
+// Spatial Hash Grid dimensions
+int gridSizeX;
+int gridSizeY;
+int gridSizeZ;
+float3 gridOrigin;
+float cellSize;
+int maxPerCell;
+
+// ════════════════════════════════════════════════════════════════════
+//  Poly6 Kernel — لحساب الكثافة
+//  W(r,h) = (315 / 64πh⁹) * (h²-r²)³   إذا r ≤ h
+// ════════════════════════════════════════════════════════════════════
+float Poly6(float rSq, float hSq)
+{
+    if (rSq >= hSq)
+        return 0.0;
+    float diff = hSq - rSq;
+    return 315.0 / (64.0 * 3.14159265 * pow(hSq, 4.5)) * diff * diff * diff;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Spiky Gradient Kernel — لحساب Δλ
+//  ∇W(r,h) = -45 / (πh⁶) * (h-r)² * r̂   إذا r ≤ h
+// ════════════════════════════════════════════════════════════════════
+float3 SpikyGrad(float3 r, float dist, float hVal)
+{
+    if (dist >= hVal || dist < 0.0001)
+        return float3(0, 0, 0);
+    float coeff = -45.0 / (3.14159265 * pow(hVal, 6.0));
+    float diff = hVal - dist;
+    return coeff * diff * diff * (r / dist);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Spatial Hash Helpers
+// ════════════════════════════════════════════════════════════════════
+int3 GetCell(float3 pos)
+{
+    float3 local = pos - gridOrigin;
+    return int3(
+        (int) (local.x / cellSize),
+        (int) (local.y / cellSize),
+        (int) (local.z / cellSize)
+    );
+}
+
+int CellIndex(int3 cell)
+{
+    if (cell.x < 0 || cell.x >= gridSizeX)
+        return -1;
+    if (cell.y < 0 || cell.y >= gridSizeY)
+        return -1;
+    if (cell.z < 0 || cell.z >= gridSizeZ)
+        return -1;
+    return cell.x + cell.y * gridSizeX + cell.z * gridSizeX * gridSizeY;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Pass 0: PredictPositions
+//  x* = x + v*dt + g*dt²
+//  كل thread = جزيء واحد
+// ════════════════════════════════════════════════════════════════════
+#pragma kernel PredictPositions
+
+[numthreads(256, 1, 1)]
+void PredictPositions(uint3 id : SV_DispatchThreadID)
+{
+    int i = (int) id.x;
+    if (i >= particleCount)
+        return;
+    if (states[i] != 0)
+        return; // 0 = INSIDE
+
+    // القوى الخارجية: جاذبية + تأثير حركة الدلو
+    float3 grav = float3(0, -gravity * gravityScale, 0);
+    float3 bucketF = -bucketAccel * bucketInfluence;
+
+    // تخفيف قوة الدلو إذا زادت عن حد
+    float bfMag = length(bucketF);
+    if (bfMag > 5.0)
+        bucketF = bucketF / bfMag * 5.0;
+
+    float3 externalForce = grav + bucketF;
+
+    // PBF Prediction: x* = x + (v + f*dt)*dt
+    velocities[i] += externalForce * dt;
+    predictedPos[i] = positions[i] + velocities[i] * dt;
+    deltaPos[i] = float3(0, 0, 0);
+    lambdas[i] = 0;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Pass 1: BuildGrid (ClearGrid + FillGrid)
+//  نبني الـ Spatial Hash Grid من المواقع المتوقعة x*
+// ════════════════════════════════════════════════════════════════════
+#pragma kernel ClearGrid
+
+[numthreads(256, 1, 1)]
+void ClearGrid(uint3 id : SV_DispatchThreadID)
+{
+    int i = (int) id.x;
+    int totalCells = gridSizeX * gridSizeY * gridSizeZ;
+    if (i >= totalCells)
+        return;
+    gridCount[i] = 0;
+}
+
+#pragma kernel FillGrid
+
+[numthreads(256, 1, 1)]
+void FillGrid(uint3 id : SV_DispatchThreadID)
+{
+    int i = (int) id.x;
+    if (i >= particleCount)
+        return;
+    if (states[i] != 0)
+        return;
+
+    int3 cell = GetCell(predictedPos[i]);
+    int cellIdx = CellIndex(cell);
+    if (cellIdx < 0)
+        return;
+
+    // InterlockedAdd — atomic operation لتجنب race condition
+    int slot;
+    InterlockedAdd(gridCount[cellIdx], 1, slot);
+
+    if (slot < maxPerCell)
+        gridParticles[cellIdx * maxPerCell + slot] = i;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Pass 2: FindNeighbors
+//  كل جزيء يبحث في 27 خلية مجاورة عن جيرانه
+// ════════════════════════════════════════════════════════════════════
+#pragma kernel FindNeighbors
+
+[numthreads(256, 1, 1)]
+void FindNeighbors(uint3 id : SV_DispatchThreadID)
+{
+    int i = (int) id.x;
+    if (i >= particleCount)
+        return;
+    if (states[i] != 0)
+        return;
+
+    float3 pi = predictedPos[i];
+    int3 cell = GetCell(pi);
+    int nCount = 0;
+    int base = i * maxNeighbors;
+    float hSq = h * h;
+
+    for (int dx = -1; dx <= 1; dx++)
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dz = -1; dz <= 1; dz++)
+            {
+                int3 nc = cell + int3(dx, dy, dz);
+                int cellIdx = CellIndex(nc);
+                if (cellIdx < 0)
+                    continue;
+
+                int count = gridCount[cellIdx];
+                for (int k = 0; k < count && nCount < maxNeighbors; k++)
+                {
+                    int j = gridParticles[cellIdx * maxPerCell + k];
+                    if (j == i)
+                        continue;
+
+                    float3 diff = predictedPos[j] - pi;
+                    if (dot(diff, diff) < hSq)
+                    {
+                        neighborList[base + nCount] = j;
+                        nCount++;
+                    }
+                }
+            }
+
+    neighborCount[i] = nCount;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Pass 3: SolveConstraints
+//
+//  معادلة PBF الأساسية:
+//
+//  الكثافة:   ρᵢ = Σⱼ W(xᵢ - xⱼ, h)
+//
+//  Constraint: Cᵢ = ρᵢ/ρ₀ - 1 = 0
+//
+//  المضاعف:   λᵢ = -Cᵢ / (Σⱼ|∇Cᵢ|² + ε)
+//
+//  التصحيح:   Δxᵢ = (1/ρ₀) Σⱼ (λᵢ+λⱼ) ∇W(xᵢ-xⱼ,h)
+// ════════════════════════════════════════════════════════════════════
+#pragma kernel SolveConstraints
+
+[numthreads(256, 1, 1)]
+void SolveConstraints(uint3 id : SV_DispatchThreadID)
+{
+    int i = (int) id.x;
+    if (i >= particleCount)
+        return;
+    if (states[i] != 0)
+        return;
+
+    float3 pi = predictedPos[i];
+    int base = i * maxNeighbors;
+    int cnt = neighborCount[i];
+    float hSq = h * h;
+
+    // ── Step 1: حساب الكثافة ρᵢ ────────────────────────────────
+    float rho = 0.0;
+    for (int k = 0; k < cnt; k++)
+    {
+        int j = neighborList[base + k];
+        float3 diff = pi - predictedPos[j];
+        float rSq = dot(diff, diff);
+        rho += Poly6(rSq, hSq);
+    }
+    // أضف تأثير الجزيء على نفسه
+    rho += Poly6(0.0, hSq);
+
+    // ── Step 2: Constraint Cᵢ = ρᵢ/ρ₀ - 1 ─────────────────────
+    float C = rho / restDensity - 1.0;
+
+    // ── Step 3: مشتق الـ Constraint ∇Cᵢ ────────────────────────
+    float3 gradSum = float3(0, 0, 0);
+    float gradSumSq = 0.0;
+
+    for (int n = 0; n < cnt; n++)
+    {
+        int j = neighborList[base + n];
+        float3 diff = pi - predictedPos[j];
+        float dist = length(diff);
+        float3 grad = SpikyGrad(diff, dist, h) / restDensity;
+
+        gradSum += grad;
+        gradSumSq += dot(grad, grad);
+    }
+    gradSumSq += dot(gradSum, gradSum);
+
+    // ── Step 4: المضاعف λᵢ ──────────────────────────────────────
+    lambdas[i] = -C / (gradSumSq + epsilon);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Pass 4: ApplyCorrection
+//  Δxᵢ = (1/ρ₀) Σⱼ (λᵢ+λⱼ) ∇W(xᵢ-xⱼ,h)
+// ════════════════════════════════════════════════════════════════════
+#pragma kernel ApplyCorrection
+
+[numthreads(256, 1, 1)]
+void ApplyCorrection(uint3 id : SV_DispatchThreadID)
+{
+    int i = (int) id.x;
+    if (i >= particleCount)
+        return;
+    if (states[i] != 0)
+        return;
+
+    float3 pi = predictedPos[i];
+    int base = i * maxNeighbors;
+    int cnt = neighborCount[i];
+    float3 dx = float3(0, 0, 0);
+
+    for (int k = 0; k < cnt; k++)
+    {
+        int j = neighborList[base + k];
+        float3 diff = pi - predictedPos[j];
+        float dist = length(diff);
+        float3 grad = SpikyGrad(diff, dist, h) / restDensity;
+
+        dx += (lambdas[i] + lambdas[j]) * grad;
+    }
+
+    deltaPos[i] = dx;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Pass 5: UpdateVelocity
+//  x    = x* + Δx
+//  v    = (x - x_old) / dt
+// ════════════════════════════════════════════════════════════════════
+#pragma kernel UpdateVelocity
+
+[numthreads(256, 1, 1)]
+void UpdateVelocity(uint3 id : SV_DispatchThreadID)
+{
+    int i = (int) id.x;
+    if (i >= particleCount)
+        return;
+    if (states[i] != 0)
+        return;
+
+    float3 newPos = predictedPos[i] + deltaPos[i];
+
+    velocities[i] = (newPos - positions[i]) / max(dt, 0.0001);
+    positions[i] = newPos;
+
+    // تقييد السرعة القصوى
+    float speed = length(velocities[i]);
+    if (speed > 5.0)
+        velocities[i] = velocities[i] / speed * 5.0;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Pass 6: EnforceBoundary
+//  حدود الدلو الأسطواني — تطبق بعد كل iteration
+// ════════════════════════════════════════════════════════════════════
+#pragma kernel EnforceBoundary
+
+[numthreads(256, 1, 1)]
+void EnforceBoundary(uint3 id : SV_DispatchThreadID)
+{
+    int i = (int) id.x;
+    if (i >= particleCount)
+        return;
+    if (states[i] != 0)
+        return;
+
+    float3 offset = positions[i] - bucketCenter;
+    float vert = dot(offset, bucketUp);
+    float3 horizVec = offset - bucketUp * vert;
+    float horizDist = length(horizVec);
+
+    // الحد السفلي
+    if (vert < bucketBottom)
+    {
+        vert = bucketBottom;
+        positions[i] = bucketCenter + horizVec + bucketUp * vert;
+        float vy = dot(velocities[i], bucketUp);
+        if (vy < 0)
+            velocities[i] -= bucketUp * vy * 1.5;
+    }
+
+    // الحد العلوي
+    if (vert > bucketTop)
+    {
+        vert = bucketTop;
+        positions[i] = bucketCenter + horizVec + bucketUp * vert;
+        float vy = dot(velocities[i], bucketUp);
+        if (vy > 0)
+            velocities[i] -= bucketUp * vy;
+    }
+
+    // الحد الجانبي
+    if (horizDist > bucketRadius && horizDist > 0.001)
+    {
+        float3 radDir = horizVec / horizDist;
+        positions[i] = bucketCenter + radDir * bucketRadius + bucketUp * vert;
+        float vRad = dot(velocities[i], radDir);
+        if (vRad > 0)
+            velocities[i] -= radDir * vRad * 1.2;
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Pass 7: FallingStep
+//  الجزيئات الساقطة — سقوط حر بسيط على GPU
+// ════════════════════════════════════════════════════════════════════
+#pragma kernel FallingStep
+
+[numthreads(256, 1, 1)]
+void FallingStep(uint3 id : SV_DispatchThreadID)
+{
+    int i = (int) id.x;
+    if (i >= particleCount)
+        return;
+    if (states[i] != 1)
+        return; // 1 = FALLING
+
+    velocities[i].y -= gravity * dt;
+    velocities[i] *= 0.995;
+    positions[i] += velocities[i] * dt;
+}
