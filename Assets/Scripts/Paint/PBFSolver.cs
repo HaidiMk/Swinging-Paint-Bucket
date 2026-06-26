@@ -74,7 +74,14 @@ public class PBFSolver : MonoBehaviour
     [Range(0.1f, 2f)] public float speedToSizeMultiplier = 0.3f;
     [Range(0, 20)] public int splashDroplets = 6;
     [Range(5, 80)] public int splashMaxRadius = 30;
+    [Range(1, 10)] public int readbackInterval = 1; // كل كم فريم نكشف الاصطدام (1 = فوري)
     [Range(0.1f, 0.8f)] public float dropletSizeRatio = 0.3f;
+
+    [Header("Impact mark — أثر السقوط")]
+    public bool sprayEnabled = true;          // أطفيه لتشوف بس نقطة محل السقوط الفعلي
+    [Range(1, 12)] public int exactDotSize = 3; // حجم نقطة محل السقوط
+    public bool flipMarkU = false;            // إذا الأثر معكوس أفقيًا عن الجزيئة
+    public bool flipMarkV = false;            // إذا الأثر معكوس عموديًا عن الجزيئة
 
     // ══════════════════════════════════════════════════════════════
     [Header("Visual — بصري")]
@@ -411,7 +418,7 @@ public class PBFSolver : MonoBehaviour
         // ── CPU Readback ─────────────────────────────────────────
         // كل فريم: نقرأ positions+states للعرض البصري
         // كل 5 frames: نضيف velocities + canvas impact + cached values
-        if (frameCount % 5 == 0)
+        if (frameCount % readbackInterval == 0)
             CPUReadback();
         else if (!cpuDataReady)
             CPUReadback(); // أول مرة نشتغل فيها — نجبر readback فوري
@@ -503,24 +510,16 @@ public class PBFSolver : MonoBehaviour
             Vector3 wp = positionsCPU[i];
             Vector3 lp = canvasTransform.InverseTransformPoint(wp);
 
-            bool hitCanvas = canvasIsHorizontal
-                ? (lp.y < 0.05f && lp.y > -0.1f)
-                : (Mathf.Abs(lp.z) < 0.05f);
-            bool inBounds = Mathf.Abs(lp.x) < 0.5f && Mathf.Abs(lp.z) < 0.5f;
+            // وصلت للسطح أو عبرتو؟ (بدون نافذة رفيعة → ما في تهرّب)
+            bool reached = canvasIsHorizontal ? (lp.y <= 0.08f) : (Mathf.Abs(lp.z) <= 0.08f);
+            if (!reached) continue;
 
-            if (hitCanvas && inBounds)
-            {
-                float speed = velocitiesCPU[i].magnitude;
-                DrawSplash(wp, speed);
-                statesCPU[i] = ON_CANVAS;
-                anyChange = true;
-            }
+            bool inBounds = Mathf.Abs(lp.x) < canvasHalfX && Mathf.Abs(lp.z) < canvasHalfZ;
+            if (inBounds)
+                DrawSplash(ProjectOntoCanvas(wp), velocitiesCPU[i]); // الأثر بمكان السطح بالضبط
 
-            if (wp.y < canvasTransform.position.y - 1f)
-            {
-                statesCPU[i] = ON_CANVAS;
-                anyChange = true;
-            }
+            statesCPU[i] = ON_CANVAS; // وقفت ع اللوحة (داخل الحدود = أثر، برّا = بس تتوقف)
+            anyChange = true;
         }
 
         if (anyChange)
@@ -589,13 +588,28 @@ public class PBFSolver : MonoBehaviour
     // ════════════════════════════════════════════════════════════════
     //  DrawSplash — رذاذ حقيقي على اللوحة
     // ════════════════════════════════════════════════════════════════
-    void DrawSplash(Vector3 worldPos, float speed)
+    void DrawSplash(Vector3 worldPos, Vector3 worldVel)
     {
         if (canvasTransform == null) return;
 
         Vector3 lp = canvasTransform.InverseTransformPoint(worldPos);
         int cx = Mathf.RoundToInt(Mathf.Clamp01((lp.x + canvasHalfX) / (canvasHalfX * 2f)) * canvasWidth);
         int cy = Mathf.RoundToInt(Mathf.Clamp01((lp.z + canvasHalfZ) / (canvasHalfZ * 2f)) * canvasHeight);
+        if (flipMarkU) cx = canvasWidth - 1 - cx;
+        if (flipMarkV) cy = canvasHeight - 1 - cy;
+
+        // نقطة نظيفة بمحل السقوط الفعلي بالضبط (دايمًا، حتى لو الرذاذ مطفّي)
+        FillCircle(cx, cy, Mathf.Max(exactDotSize, 1), paintColor);
+        if (!sprayEnabled) { canvasDirty = true; return; }
+
+        float speed = worldVel.magnitude;
+
+        // اتجاه حركة الجزيء مسقَطًا على اللوحة → الرذاذ ينثر للأمام
+        Vector3 lv = canvasTransform.InverseTransformVector(worldVel);
+        Vector2 dir = new Vector2(lv.x, lv.z);
+        float horiz = dir.magnitude;
+        float baseAng = horiz > 1e-4f ? Mathf.Atan2(dir.y, dir.x) : Random.Range(0f, Mathf.PI * 2f);
+        float forwardness = Mathf.Clamp01(horiz / 2.5f);   // 0 = نزول عمودي، 1 = حركة جانبية سريعة
 
         float spreadMult = GetSpreadMult();
         int mainR = Mathf.Max(Mathf.RoundToInt(
@@ -603,36 +617,46 @@ public class PBFSolver : MonoBehaviour
             * Mathf.Clamp(Mathf.Sqrt(speed) * speedToSizeMultiplier, 0.4f, 4f)
             * spreadMult), 1);
 
+        // 1) الأثر الرئيسي — عدة دوائر متداخلة لحافة غير منتظمة (مشدودة للأمام)
         FillCircle(cx, cy, mainR, paintColor);
-
-        // قطرات رذاذ
-        int dropCount = Mathf.RoundToInt(splashDroplets * Mathf.Clamp01(speed / 3f));
-        for (int s = 0; s < dropCount; s++)
+        int lobes = 3 + Mathf.RoundToInt(forwardness * 3f);
+        for (int l = 0; l < lobes; l++)
         {
-            float angle = Random.Range(0f, Mathf.PI * 2f);
-            float dist = Random.Range(mainR + 2, mainR + splashMaxRadius);
-            int dropR = Mathf.Max(Mathf.RoundToInt(mainR * dropletSizeRatio), 1);
-            Color dc = paintColor * Random.Range(0.6f, 0.9f);
-            dc.a = paintColor.a * 0.7f;
-            FillCircle(
-                cx + Mathf.RoundToInt(Mathf.Cos(angle) * dist),
-                cy + Mathf.RoundToInt(Mathf.Sin(angle) * dist),
-                dropR, dc);
+            float a = baseAng + Random.Range(-1f, 1f) * Mathf.Lerp(3.1f, 0.8f, forwardness);
+            float off = mainR * Random.Range(0.4f, 1.0f) * (1f + forwardness);
+            int lr = Mathf.Max(Mathf.RoundToInt(mainR * Random.Range(0.4f, 0.8f)), 1);
+            FillCircle(cx + Mathf.RoundToInt(Mathf.Cos(a) * off),
+                       cy + Mathf.RoundToInt(Mathf.Sin(a) * off), lr, paintColor);
         }
 
-        // خيوط (Streaks) عند السرعات العالية
+        // 2) قطرات الرذاذ — منحازة لاتجاه الحركة، تصغر وتخفّ كل ما بعدت
+        int dropCount = 3 + Mathf.RoundToInt(splashDroplets * Mathf.Clamp01(speed / 2f));
+        for (int s = 0; s < dropCount; s++)
+        {
+            float cone = Mathf.Lerp(Mathf.PI, 0.5f, forwardness);   // أسرع → مخروط أمامي أضيق
+            float a = baseAng + Random.Range(-cone, cone);
+            float dN = Random.value;                                 // 0 قريب، 1 بعيد
+            float dist = mainR + 2 + dN * splashMaxRadius * (0.6f + forwardness);
+            int dropR = Mathf.Max(Mathf.RoundToInt(mainR * dropletSizeRatio * (1f - dN * 0.7f)), 1);
+            Color dc = paintColor * Random.Range(0.65f, 0.95f);
+            dc.a = paintColor.a * (0.85f - dN * 0.45f);              // أخف كل ما بعد
+            FillCircle(cx + Mathf.RoundToInt(Mathf.Cos(a) * dist),
+                       cy + Mathf.RoundToInt(Mathf.Sin(a) * dist), dropR, dc);
+        }
+
+        // 3) خيوط رفيعة عند الصدمات القوية — مرمية للأمام
         if (speed > 1.5f)
         {
-            int streaks = Mathf.Min(Mathf.RoundToInt(3 + speed * 2f), 12);
+            int streaks = Mathf.Min(2 + Mathf.RoundToInt(speed), 10);
             for (int s = 0; s < streaks; s++)
             {
-                float angle = (s / (float)streaks) * Mathf.PI * 2f
-                            + Random.Range(-0.2f, 0.2f);
+                float cone = Mathf.Lerp(Mathf.PI, 0.6f, forwardness);
+                float a = baseAng + Random.Range(-cone, cone);
                 float len = Random.Range(mainR * 1.2f, mainR + splashMaxRadius * 0.7f);
+                Color sc = paintColor * 0.8f; sc.a = paintColor.a * 0.7f;
                 DrawLinePixels(cx, cy,
-                    cx + Mathf.RoundToInt(Mathf.Cos(angle) * len),
-                    cy + Mathf.RoundToInt(Mathf.Sin(angle) * len),
-                    paintColor * 0.8f);
+                    cx + Mathf.RoundToInt(Mathf.Cos(a) * len),
+                    cy + Mathf.RoundToInt(Mathf.Sin(a) * len), sc);
             }
         }
 

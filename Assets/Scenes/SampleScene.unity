@@ -556,6 +556,7 @@ GameObject:
   - component: {fileID: 967485739}
   - component: {fileID: 967485741}
   - component: {fileID: 967485740}
+  - component: {fileID: 967485742}
   m_Layer: 0
   m_Name: PaintManager
   m_TagString: Untagged
@@ -601,7 +602,7 @@ MonoBehaviour:
   velocityBoostFactor: 1.5
   enableTorricelli: 1
   enableTrail: 1
-  trailMinThickness: 2
+  trailMinThickness: 1
   trailMaxThickness: 3
   showLog: 1
   holeOpen: 1
@@ -622,15 +623,15 @@ MonoBehaviour:
   canvasTransform: {fileID: 829268569}
   canvasRenderer: {fileID: 829268567}
   pbfComputeShader: {fileID: 7200000, guid: d47f37d3181feb347ae1cae2b90d28e1, type: 3}
-  paintType: 1
-  maxParticles: 5000
+  paintType: 0
+  maxParticles: 80000
   h: 0.18
   restDensity: 6
   solverIterations: 3
   epsilon: 600
   G: 9.81
-  bucketWorldRadius: 0.1
-  bucketWorldHeight: 0.1
+  bucketWorldRadius: 0.35
+  bucketWorldHeight: 0.8
   bucketCenterOffset: {x: 0, y: 0, z: 0.7}
   canvasWidth: 1024
   canvasHeight: 1024
@@ -647,6 +648,21 @@ MonoBehaviour:
   gravityScale: 0.6
   bucketInfluence: 0.3
   SIGMA: 0.3
+--- !u!114 &967485742
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 967485737}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e472e3b2d3d604a48a9620b0c76a1795, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PaintParticleRenderer
+  solver: {fileID: 967485741}
+  material: {fileID: 2100000, guid: ff16b42a35384dc4cab212ad96f86f49, type: 2}
+  particleScale: 0.06
 --- !u!1001 &1006875360
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -791,7 +807,7 @@ MonoBehaviour:
   ropeTwistStiffness: 8
   ropeTwistDamping: 1
   thetaDeg: 30
-  phiDeg: 360
+  phiDeg: 60
   thetaVel0: 0
   phiVel0: 3
   theta: 60
