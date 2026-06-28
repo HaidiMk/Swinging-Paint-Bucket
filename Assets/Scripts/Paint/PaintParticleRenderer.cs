@@ -1,4 +1,4 @@
-using UnityEngine;
+ï»¿using UnityEngine;
 
 // Renders the PBF particles as GPU-instanced sphere-imposters.
 // Reads positions/states directly from the solver's ComputeBuffers,
@@ -32,7 +32,7 @@ public class PaintParticleRenderer : MonoBehaviour
         int count = solver.ParticleCount;
         if (count != cachedCount) { BuildArgs(count); cachedCount = count; }
 
-        // Bind GPU buffers (these stay on the GPU — no readback)
+        // Bind GPU buffers (these stay on the GPU ï¿½ no readback)
         material.SetBuffer("_Positions", solver.PositionsBuffer);
         material.SetBuffer("_States", solver.StatesBuffer);
 

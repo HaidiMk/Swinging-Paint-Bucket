@@ -36,6 +36,11 @@ public class PBFSolver : MonoBehaviour
     public enum PaintType
     { Watercolor, Acrylic, OilPaint, Tempera, Gouache, Latex, Enamel, Ink }
 
+    [Header("Surface — نوع سطح اللوحة")]
+    public SurfaceType surfaceType = SurfaceType.Cloth;
+    public enum SurfaceType
+    { Paper, Cloth, Wood, Metal }   // ورق، قماش، خشب، معدن
+
     // ══════════════════════════════════════════════════════════════
     [Header("PBF Settings — إعدادات المحاكاة")]
     [Tooltip("عدد الجزيئات — RTX 2050 يدعم 50K-200K بسهولة")]
@@ -157,6 +162,9 @@ public class PBFSolver : MonoBehaviour
     Texture2D canvasTex;
     Color[] canvasPx;
     bool canvasDirty;
+    public string saveFolder = @"C:\Users\Haidi\VR_Project"; // مسار حفظ الصورة والتقرير
+    int paintedSplats = 0;     // عدد المسارات (بقع نزلت ع اللوحة)
+    float motionElapsed = 0f;  // زمن الحركة
     float canvasHalfX = 0.5f;
     float canvasHalfZ = 0.5f;
 
@@ -591,6 +599,7 @@ public class PBFSolver : MonoBehaviour
     void DrawSplash(Vector3 worldPos, Vector3 worldVel)
     {
         if (canvasTransform == null) return;
+        paintedSplats++;   // كل جزيئة نزلت = مسار
 
         Vector3 lp = canvasTransform.InverseTransformPoint(worldPos);
         int cx = Mathf.RoundToInt(Mathf.Clamp01((lp.x + canvasHalfX) / (canvasHalfX * 2f)) * canvasWidth);
@@ -611,56 +620,145 @@ public class PBFSolver : MonoBehaviour
         float baseAng = horiz > 1e-4f ? Mathf.Atan2(dir.y, dir.x) : Random.Range(0f, Mathf.PI * 2f);
         float forwardness = Mathf.Clamp01(horiz / 2.5f);   // 0 = نزول عمودي، 1 = حركة جانبية سريعة
 
+        // معاملات نوع السطح: الانتشار، نعومة الحافة، كمية الرذاذ، التشبّع (امتصاص)
+        float sSpread, sSoft, sDrop, sWet;
+        switch (surfaceType)
+        {
+            case SurfaceType.Paper: sSpread = 1.4f; sSoft = 0.85f; sDrop = 0.5f; sWet = 0.70f; break; // يمتصّ وينتشر، حواف ناعمة، باهت
+            case SurfaceType.Cloth: sSpread = 1.2f; sSoft = 0.60f; sDrop = 0.8f; sWet = 0.85f; break; // قماش
+            case SurfaceType.Wood: sSpread = 1.0f; sSoft = 0.35f; sDrop = 1.0f; sWet = 0.90f; break; // خشب
+            default: sSpread = 0.7f; sSoft = 0.05f; sDrop = 1.8f; sWet = 1.00f; break; // معدن: حواف حادّة، رذاذ أكتر، لمّاع
+        }
+        Color baseCol = paintColor; baseCol.a = paintColor.a * sWet;
+
         float spreadMult = GetSpreadMult();
         int mainR = Mathf.Max(Mathf.RoundToInt(
             baseBrushSize
             * Mathf.Clamp(Mathf.Sqrt(speed) * speedToSizeMultiplier, 0.4f, 4f)
-            * spreadMult), 1);
+            * spreadMult * sSpread), 1);
 
-        // 1) الأثر الرئيسي — عدة دوائر متداخلة لحافة غير منتظمة (مشدودة للأمام)
-        FillCircle(cx, cy, mainR, paintColor);
-        int lobes = 3 + Mathf.RoundToInt(forwardness * 3f);
-        for (int l = 0; l < lobes; l++)
-        {
-            float a = baseAng + Random.Range(-1f, 1f) * Mathf.Lerp(3.1f, 0.8f, forwardness);
-            float off = mainR * Random.Range(0.4f, 1.0f) * (1f + forwardness);
-            int lr = Mathf.Max(Mathf.RoundToInt(mainR * Random.Range(0.4f, 0.8f)), 1);
-            FillCircle(cx + Mathf.RoundToInt(Mathf.Cos(a) * off),
-                       cy + Mathf.RoundToInt(Mathf.Sin(a) * off), lr, paintColor);
-        }
-
-        // 2) قطرات الرذاذ — منحازة لاتجاه الحركة، تصغر وتخفّ كل ما بعدت
-        int dropCount = 3 + Mathf.RoundToInt(splashDroplets * Mathf.Clamp01(speed / 2f));
-        for (int s = 0; s < dropCount; s++)
-        {
-            float cone = Mathf.Lerp(Mathf.PI, 0.5f, forwardness);   // أسرع → مخروط أمامي أضيق
-            float a = baseAng + Random.Range(-cone, cone);
-            float dN = Random.value;                                 // 0 قريب، 1 بعيد
-            float dist = mainR + 2 + dN * splashMaxRadius * (0.6f + forwardness);
-            int dropR = Mathf.Max(Mathf.RoundToInt(mainR * dropletSizeRatio * (1f - dN * 0.7f)), 1);
-            Color dc = paintColor * Random.Range(0.65f, 0.95f);
-            dc.a = paintColor.a * (0.85f - dN * 0.45f);              // أخف كل ما بعد
-            FillCircle(cx + Mathf.RoundToInt(Mathf.Cos(a) * dist),
-                       cy + Mathf.RoundToInt(Mathf.Sin(a) * dist), dropR, dc);
-        }
-
-        // 3) خيوط رفيعة عند الصدمات القوية — مرمية للأمام
-        if (speed > 1.5f)
-        {
-            int streaks = Mathf.Min(2 + Mathf.RoundToInt(speed), 10);
-            for (int s = 0; s < streaks; s++)
-            {
-                float cone = Mathf.Lerp(Mathf.PI, 0.6f, forwardness);
-                float a = baseAng + Random.Range(-cone, cone);
-                float len = Random.Range(mainR * 1.2f, mainR + splashMaxRadius * 0.7f);
-                Color sc = paintColor * 0.8f; sc.a = paintColor.a * 0.7f;
-                DrawLinePixels(cx, cy,
-                    cx + Mathf.RoundToInt(Mathf.Cos(a) * len),
-                    cy + Mathf.RoundToInt(Mathf.Sin(a) * len), sc);
-            }
-        }
+        // الأثر حسب نوع السطح — لكل سطح بصمة بصرية واضحة
+        DrawSurfaceMark(cx, cy, mainR, baseAng, forwardness, speed, baseCol, sSoft, sDrop);
 
         canvasDirty = true;
+    }
+
+    // بصمة بصرية مميّزة وواقعية لكل نوع سطح
+    void DrawSurfaceMark(int cx, int cy, int mainR, float baseAng, float forwardness,
+                         float speed, Color col, float soft, float dropMul)
+    {
+        switch (surfaceType)
+        {
+            // ── ورق: ألوان مائية — مركز مغسول فاتح + حلقة تغميق بالحافة + نشّ وأصابع ──
+            case SurfaceType.Paper:
+                {
+                    Color wash = Color.Lerp(col, Color.white, 0.35f); wash.a = col.a * 0.55f; // مركز مغسول
+                    Color edge = Color.Lerp(col, Color.black, 0.18f); edge.a = col.a * 0.75f; // صبغة متجمّعة بالحافة
+                    Color halo = col; halo.a = col.a * 0.12f;
+
+                    FillCircleSoft(cx, cy, Mathf.RoundToInt(mainR * 2.4f), halo, 0.98f);      // نشّ واسع
+                    for (int i = 0; i < 8; i++)                                               // أصابع نشّ غير منتظمة
+                    {
+                        float a = Random.Range(0f, Mathf.PI * 2f);
+                        float d = mainR * Random.Range(1.1f, 2.1f);
+                        FillCircleSoft(cx + Mathf.RoundToInt(Mathf.Cos(a) * d),
+                                       cy + Mathf.RoundToInt(Mathf.Sin(a) * d),
+                                       Mathf.Max(Mathf.RoundToInt(mainR * Random.Range(0.25f, 0.55f)), 1), halo, 0.97f);
+                    }
+                    FillCircleSoft(cx, cy, Mathf.RoundToInt(mainR * 1.3f), edge, 0.7f);       // طبقة الحافة الغامقة
+                    FillCircleSoft(cx, cy, Mathf.RoundToInt(mainR * 1.0f), wash, 0.85f);      // المركز الفاتح فوقها → رِم غامق
+                    for (int i = 0; i < 10; i++)                                              // تحبّب الصبغة
+                    {
+                        float a = Random.Range(0f, Mathf.PI * 2f);
+                        float d = mainR * Random.Range(0f, 1.1f);
+                        FillCircle(cx + Mathf.RoundToInt(Mathf.Cos(a) * d),
+                                   cy + Mathf.RoundToInt(Mathf.Sin(a) * d), 1, edge);
+                    }
+                    break;
+                }
+
+            // ── قماش: نسيج خيوط متعامد (سداء/لحمة) بظلال ──
+            case SurfaceType.Cloth:
+                {
+                    FillCircleWeave(cx, cy, Mathf.RoundToInt(mainR * 1.2f), col);
+                    int n = 4 + Mathf.RoundToInt(dropMul * 3f);
+                    for (int i = 0; i < n; i++)
+                    {
+                        float a = baseAng + Random.Range(-1.2f, 1.2f);
+                        float d = mainR * Random.Range(1.2f, 2.3f);
+                        FillCircleWeave(cx + Mathf.RoundToInt(Mathf.Cos(a) * d),
+                                        cy + Mathf.RoundToInt(Mathf.Sin(a) * d),
+                                        Mathf.Max(Mathf.RoundToInt(mainR * 0.45f), 1), col);
+                    }
+                    break;
+                }
+
+            // ── خشب: بقعة ممدودة بقوة باتجاه العرق + عروق دقيقة متعددة + تجمّع بالأخاديد ──
+            case SurfaceType.Wood:
+                {
+                    for (int k = -4; k <= 4; k++)   // تمدّد أفقي أوسع
+                    {
+                        int ox = cx + k * Mathf.Max(Mathf.RoundToInt(mainR * 0.55f), 1);
+                        FillCircleSoft(ox, cy, Mathf.Max(Mathf.RoundToInt(mainR * 0.7f), 1), col, 0.45f);
+                    }
+                    for (int g = 0; g < 5; g++)     // عروق دقيقة بدرجات مختلفة
+                    {
+                        int oy = cy + Random.Range(-mainR, mainR);
+                        Color gl = col * Random.Range(0.5f, 0.72f); gl.a = col.a * 0.55f;
+                        DrawLinePixels(cx - mainR * 3, oy, cx + mainR * 3, oy, gl);
+                    }
+                    for (int i = 0; i < 6; i++)     // تجمّع غامق بالأخاديد
+                    {
+                        int ox = cx + Random.Range(-mainR * 3, mainR * 3);
+                        int oy = cy + Random.Range(-mainR, mainR);
+                        Color dk = col * 0.5f; dk.a = col.a * 0.5f;
+                        FillCircle(ox, oy, 1, dk);
+                    }
+                    break;
+                }
+
+            // ── معدن: حبيبات لمّاعة حادّة — حافة meniscus غامقة + لمعة بيضا قوية ──
+            default:
+                {
+                    int beads = 5 + Mathf.RoundToInt(dropMul * 3f + speed);
+                    for (int b = 0; b < beads; b++)
+                    {
+                        float a = baseAng + Random.Range(-2.2f, 2.2f);
+                        float d = Random.Range(0f, mainR * (1.4f + forwardness));
+                        int bx = cx + Mathf.RoundToInt(Mathf.Cos(a) * d);
+                        int by = cy + Mathf.RoundToInt(Mathf.Sin(a) * d);
+                        int br = Mathf.Max(Mathf.RoundToInt(mainR * Random.Range(0.35f, 0.75f)), 2);
+
+                        Color rim = Color.Lerp(col, Color.black, 0.28f); rim.a = col.a; // حافة الحبّة الغامقة
+                        FillCircle(bx, by, br + 1, rim);
+                        FillCircle(bx, by, br, col);                                    // جسم الحبّة الحادّ
+                        Color hi = Color.Lerp(col, Color.white, 0.85f); hi.a = col.a;
+                        int hr = Mathf.Max(br / 4, 1);
+                        FillCircle(bx - Mathf.Max(br / 3, 1), by - Mathf.Max(br / 3, 1), hr, hi); // لمعة قوية
+                    }
+                    break;
+                }
+        }
+    }
+
+    // نسيج خيوط متعامد بظلال (سداء عمودي + لحمة أفقية) — للسطح القماشي
+    void FillCircleWeave(int cx, int cy, int r, Color c)
+    {
+        if (r < 1) r = 1;
+        int r2 = r * r;
+        for (int dx = -r; dx <= r; dx++)
+            for (int dy = -r; dy <= r; dy++)
+            {
+                if (dx * dx + dy * dy > r2) continue;
+                int px = Mathf.Clamp(cx + dx, 0, canvasWidth - 1);
+                int py = Mathf.Clamp(cy + dy, 0, canvasHeight - 1);
+                int u = px % 6, v = py % 6;
+                bool warp = u < 3, weft = v < 3;
+                float shade = (warp ^ weft) ? 1f : 0.55f;        // فوق-تحت
+                if (u == 0 || v == 0) shade *= 0.4f;             // فراغات الخيوط (ظل)
+                float a = c.a * 0.85f * shade;
+                canvasPx[py * canvasWidth + px] = Color.Lerp(canvasPx[py * canvasWidth + px], c, a);
+            }
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -694,6 +792,10 @@ public class PBFSolver : MonoBehaviour
     // ════════════════════════════════════════════════════════════════
     void Update()
     {
+        // مؤقّت زمن الحركة + اختصار الحفظ
+        if (pendulum != null && pendulum.IsRunning) motionElapsed += Time.deltaTime;
+        if (Input.GetKeyDown(KeyCode.F9)) SaveExperiment();
+
         // if (visualDirty) { UpdateVisualPS(); visualDirty = false; }   // ← off: GPU instanced renderer now handles visuals
         if (canvasDirty)
         {
@@ -713,6 +815,25 @@ public class PBFSolver : MonoBehaviour
                 int px = Mathf.Clamp(cx + dx, 0, canvasWidth - 1);
                 int py = Mathf.Clamp(cy + dy, 0, canvasHeight - 1);
                 canvasPx[py * canvasWidth + px] = Color.Lerp(canvasPx[py * canvasWidth + px], c, c.a * 0.85f);
+            }
+    }
+
+    // مثل FillCircle بس بحافة ناعمة: softness=0 حادّة (معدن)، softness~0.9 ممتصّة (ورق)
+    void FillCircleSoft(int cx, int cy, int r, Color c, float softness)
+    {
+        if (r < 1) r = 1;
+        float inner = 1f - Mathf.Clamp01(softness); // نسبة نصف القطر المعتمة بالكامل
+        float fade = Mathf.Max(1f - inner, 1e-3f);
+        for (int dx = -r; dx <= r; dx++)
+            for (int dy = -r; dy <= r; dy++)
+            {
+                float dist = Mathf.Sqrt(dx * dx + dy * dy) / r; // 0..1
+                if (dist > 1f) continue;
+                float edge = dist <= inner ? 1f : Mathf.Clamp01(1f - (dist - inner) / fade);
+                int px = Mathf.Clamp(cx + dx, 0, canvasWidth - 1);
+                int py = Mathf.Clamp(cy + dy, 0, canvasHeight - 1);
+                float a = c.a * 0.85f * edge;
+                canvasPx[py * canvasWidth + px] = Color.Lerp(canvasPx[py * canvasWidth + px], c, a);
             }
     }
 
@@ -813,10 +934,148 @@ public class PBFSolver : MonoBehaviour
         canvasTex.SetPixels(canvasPx);
         canvasTex.Apply();
         BreakTrail();
+        paintedSplats = 0;
+        motionElapsed = 0f;
     }
 
     public void SaveCanvas(string path = "PaintResult.png")
         => System.IO.File.WriteAllBytes(path, canvasTex.EncodeToPNG());
+
+    // مساحة انتشار اللون (m²) + النسبة المئوية من اللوحة
+    public float CoverageArea(out float percent)
+    {
+        var bg = new Color(0.95f, 0.92f, 0.85f, 1f);
+        int painted = 0;
+        for (int i = 0; i < canvasPx.Length; i++)
+        {
+            Color c = canvasPx[i];
+            if (Mathf.Abs(c.r - bg.r) + Mathf.Abs(c.g - bg.g) + Mathf.Abs(c.b - bg.b) > 0.06f)
+                painted++;
+        }
+        percent = 100f * painted / canvasPx.Length;
+
+        float sx = canvasTransform ? Mathf.Abs(canvasTransform.lossyScale.x) : 1f;
+        float sz = canvasTransform ? Mathf.Abs(canvasTransform.lossyScale.z) : 1f;
+        float pixelArea = (2f * canvasHalfX * sx / canvasWidth) * (2f * canvasHalfZ * sz / canvasHeight);
+        return painted * pixelArea;
+    }
+
+    // Detailed English experiment report (inputs + outputs)
+    string BuildReport()
+    {
+        float pct; float cov = CoverageArea(out pct);
+        var hole = FindFirstObjectByType<BucketHole>();
+        var sb = new System.Text.StringBuilder();
+
+        sb.AppendLine("============================================================");
+        sb.AppendLine("     SWINGING PAINT BUCKET  -  EXPERIMENT REPORT");
+        sb.AppendLine("============================================================");
+        sb.AppendLine("Date / Time : " + System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+        sb.AppendLine();
+
+        sb.AppendLine("------------------------------------------------------------");
+        sb.AppendLine(" INPUTS");
+        sb.AppendLine("------------------------------------------------------------");
+
+        sb.AppendLine("[A] BUCKET");
+        if (pendulum != null)
+        {
+            sb.AppendLine($"    Mass                : {pendulum.bucketMass:F3} kg");
+            sb.AppendLine($"    Radius              : {pendulum.bucketRadius:F3} m");
+            sb.AppendLine($"    Fluid mass          : {pendulum.fluidMass:F3} kg");
+        }
+        sb.AppendLine($"    Paint capacity      : {maxParticles} particles");
+        if (hole != null)
+            sb.AppendLine($"    Exit hole diameter  : {hole.holeDiameter:F4} m");
+        sb.AppendLine();
+
+        sb.AppendLine("[B] SUSPENSION");
+        if (pendulum != null)
+        {
+            sb.AppendLine($"    Rope length         : {pendulum.restLength:F3} m");
+            sb.AppendLine($"    Rope stiffness      : {pendulum.ropeStiffness:F1}");
+            sb.AppendLine($"    Twist stiffness     : {pendulum.ropeTwistStiffness:F1}");
+            sb.AppendLine($"    Pivot point         : {pendulum.pivotPosition}");
+        }
+        sb.AppendLine();
+
+        sb.AppendLine("[C] MOTION");
+        if (pendulum != null)
+        {
+            sb.AppendLine($"    Start angle (theta) : {pendulum.thetaDeg:F1} deg");
+            sb.AppendLine($"    Direction (phi)     : {pendulum.phiDeg:F1} deg");
+            sb.AppendLine($"    Initial theta vel   : {pendulum.thetaVel0:F3} rad/s");
+            sb.AppendLine($"    Initial phi vel     : {pendulum.phiVel0:F3} rad/s");
+            sb.AppendLine($"    Target swings       : {pendulum.n_swings}");
+        }
+        sb.AppendLine();
+
+        sb.AppendLine("[D] ENVIRONMENT");
+        if (pendulum != null)
+        {
+            sb.AppendLine($"    Gravity             : {pendulum.gravity:F3} m/s^2");
+            sb.AppendLine($"    Air density         : {pendulum.airDensity:F3} kg/m^3");
+            sb.AppendLine($"    Drag coefficient    : {pendulum.dragCoefficient:F3}");
+            sb.AppendLine($"    Air humidity        : {pendulum.humidity * 100f:F0} %");
+            sb.AppendLine($"    Joint friction      : {pendulum.jointFriction:F3}");
+        }
+        sb.AppendLine();
+
+        sb.AppendLine("[E] PAINT");
+        sb.AppendLine($"    Type                : {paintType}");
+        sb.AppendLine($"    Color               : {ColorHex(paintColor)}  (RGBA {paintColor.r:F2},{paintColor.g:F2},{paintColor.b:F2},{paintColor.a:F2})");
+        sb.AppendLine($"    Rest density        : {restDensity:F2}");
+        if (hole != null)
+            sb.AppendLine($"    Flow rate (base)    : {hole.particlesPerSecond:F1} particles/s");
+        sb.AppendLine();
+
+        sb.AppendLine("[F] CANVAS");
+        sb.AppendLine($"    Resolution          : {canvasWidth} x {canvasHeight} px");
+        sb.AppendLine($"    Surface type        : {surfaceType}");
+        float sx = canvasTransform ? Mathf.Abs(canvasTransform.lossyScale.x) : 1f;
+        float sz = canvasTransform ? Mathf.Abs(canvasTransform.lossyScale.z) : 1f;
+        sb.AppendLine($"    Physical size       : {2f * canvasHalfX * sx:F2} x {2f * canvasHalfZ * sz:F2} m");
+        sb.AppendLine($"    Orientation         : {(canvasIsHorizontal ? "Horizontal" : "Vertical")}");
+        sb.AppendLine();
+
+        sb.AppendLine("------------------------------------------------------------");
+        sb.AppendLine(" OUTPUTS / RESULTS");
+        sb.AppendLine("------------------------------------------------------------");
+        sb.AppendLine($"    Motion time         : {motionElapsed:F2} s");
+        if (pendulum != null)
+        {
+            sb.AppendLine($"    Swings completed    : {pendulum.SwingCount} / {pendulum.n_swings}");
+            sb.AppendLine($"    Theoretical period  : {pendulum.TheoreticalPeriod():F3} s");
+            sb.AppendLine($"    Energy at start     : {pendulum.EnergyAtStart:F3} J");
+            sb.AppendLine($"    Energy now          : {pendulum.TotalEnergy():F3} J");
+            sb.AppendLine($"    Bucket speed now    : {pendulum.GetBucketVelocity().magnitude:F3} m/s");
+        }
+        sb.AppendLine($"    Paths drawn (splats): {paintedSplats}");
+        sb.AppendLine($"    Particles inside    : {InsideCount()} / {maxParticles}");
+        sb.AppendLine($"    Color spread area   : {cov:F4} m^2");
+        sb.AppendLine($"    Canvas coverage     : {pct:F2} %");
+        sb.AppendLine();
+        sb.AppendLine("============================================================");
+        return sb.ToString();
+    }
+
+    string ColorHex(Color c) => $"#{(int)(c.r * 255):X2}{(int)(c.g * 255):X2}{(int)(c.b * 255):X2}";
+
+    // حفظ التجربة: صورة PNG + تقرير نصّي في مجلّد واحد
+    public void SaveExperiment()
+    {
+        if (canvasTex == null) return;
+        string dir = string.IsNullOrEmpty(saveFolder)
+            ? System.IO.Path.Combine(Application.persistentDataPath, "PaintResults")
+            : saveFolder;
+        System.IO.Directory.CreateDirectory(dir);
+        string stamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        string png = System.IO.Path.Combine(dir, $"canvas_{stamp}.png");
+        string txt = System.IO.Path.Combine(dir, $"report_{stamp}.txt");
+        System.IO.File.WriteAllBytes(png, canvasTex.EncodeToPNG());
+        System.IO.File.WriteAllText(txt, BuildReport());
+        Debug.Log($"[Experiment] تم الحفظ في:\n{png}\n{txt}");
+    }
 
     // ════════════════════════════════════════════════════════════════
     //  Init Helpers

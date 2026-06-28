@@ -1,4 +1,4 @@
-Shader "Custom/PaintParticleInstancedURP"
+﻿Shader "Custom/PaintParticleInstancedURP"
 {
     // GPU-instanced sphere-imposter:
     //   - one camera-facing quad per particle (2 triangles)

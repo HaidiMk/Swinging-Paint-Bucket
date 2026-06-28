@@ -15,6 +15,7 @@ public class SphericalPendulum : MonoBehaviour
 {
     public Transform bucket;
     public Transform pivot;
+    public PBFSolver paintSolver;   // للحفظ من زر الـ HUD (يُلقى تلقائيًا إن تُرك فاضي)
 
     [Header("Bucket Properties — خصائص الدلو")]
     [Tooltip("كتلة الدلو + الطلاء (kg).")]
@@ -635,7 +636,7 @@ public class SphericalPendulum : MonoBehaviour
         trail.colorGradient = g;
     }
 
-    float TotalEnergy()
+    public float TotalEnergy()
     {
         float sinT = Mathf.Sin(theta);
         float kinetic = 0.5f * bucketMass * (
@@ -669,6 +670,8 @@ public class SphericalPendulum : MonoBehaviour
     public float TorsionAngleDeg => ropeTwistAngle * Mathf.Rad2Deg;
     public float VibrationStrength => vibrationStrength;
     public bool IsRunning => simRunning;
+    public int SwingCount => zeroCrossCount / 2;
+    public float EnergyAtStart => energyAtStart;
 
     // ════════════════════════════════════════════════════════════════
     //  ResetSimulation — إعادة التشغيل الكاملة
@@ -768,6 +771,12 @@ public class SphericalPendulum : MonoBehaviour
         // زر Reset
         if (GUI.Button(new Rect(x, y + lh * 14 + 4, 100, 22), "Reset"))
             ResetSimulation();
+        // زر حفظ التجربة (صورة + تقرير)
+        if (GUI.Button(new Rect(x + 108, y + lh * 14 + 4, 100, 22), "حفظ / Save"))
+        {
+            if (paintSolver == null) paintSolver = FindFirstObjectByType<PBFSolver>();
+            if (paintSolver != null) paintSolver.SaveExperiment();
+        }
     }
 }
 // ════════════════════════════════════════════════════════════════════
