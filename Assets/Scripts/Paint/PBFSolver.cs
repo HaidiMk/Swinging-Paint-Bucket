@@ -103,6 +103,7 @@ public class PBFSolver : MonoBehaviour
     [HideInInspector] public float gravityScale = 0.6f;
     [HideInInspector] public float bucketInfluence = 0.3f;
     [HideInInspector] public float SIGMA = 0.3f;
+    [HideInInspector] public float viscosity = 0.3f; // تُضبط حسب نوع الدهان
 
     // ══════════════════════════════════════════════════════════════
     //  GPU Buffers — كل البيانات على كرت الشاشة
@@ -128,6 +129,7 @@ public class PBFSolver : MonoBehaviour
     int kSolveConstraints;
     int kApplyCorrection;
     int kUpdateVelocity;
+    int kApplyViscosity;
     int kEnforceBoundary;
     int kFallingStep;
 
@@ -295,6 +297,7 @@ public class PBFSolver : MonoBehaviour
         kSolveConstraints = pbfComputeShader.FindKernel("SolveConstraints");
         kApplyCorrection = pbfComputeShader.FindKernel("ApplyCorrection");
         kUpdateVelocity = pbfComputeShader.FindKernel("UpdateVelocity");
+        kApplyViscosity = pbfComputeShader.FindKernel("ApplyViscosity");
         kEnforceBoundary = pbfComputeShader.FindKernel("EnforceBoundary");
         kFallingStep = pbfComputeShader.FindKernel("FallingStep");
 
@@ -318,7 +321,8 @@ public class PBFSolver : MonoBehaviour
         int[] kernels = {
             kPredictPositions, kClearGrid, kFillGrid,
             kFindNeighbors, kSolveConstraints, kApplyCorrection,
-            kUpdateVelocity, kEnforceBoundary, kFallingStep
+            kUpdateVelocity, kEnforceBoundary, kFallingStep,
+            kApplyViscosity
         };
 
         foreach (int k in kernels)
@@ -417,6 +421,10 @@ public class PBFSolver : MonoBehaviour
         // Pass 4: تحديث السرعة والموقع
         Dispatch(kUpdateVelocity);
 
+        // Pass 4ب: اللزوجة (تماسك داخل الدلو)
+        if (viscosity > 0f)
+            Dispatch(kApplyViscosity);
+
         // Pass 5: حدود الدلو
         Dispatch(kEnforceBoundary);
 
@@ -450,6 +458,7 @@ public class PBFSolver : MonoBehaviour
         pbfComputeShader.SetFloat("gravity", G);
         pbfComputeShader.SetFloat("gravityScale", gravityScale);
         pbfComputeShader.SetFloat("bucketInfluence", bucketInfluence);
+        pbfComputeShader.SetFloat("viscosity", viscosity);
         pbfComputeShader.SetVector("bucketAccel", bucketAccelWorld);
         pbfComputeShader.SetInt("particleCount", maxParticles);
         pbfComputeShader.SetInt("maxNeighbors", MAX_NEIGHBORS);
@@ -631,11 +640,17 @@ public class PBFSolver : MonoBehaviour
         }
         Color baseCol = paintColor; baseCol.a = paintColor.a * sWet;
 
+        // تأثير اللزوجة على شكل البقعة (مضخّم ليبين بسهولة):
+        //   لزج عالي → بقع كبيرة متماسكة + رذاذ شبه معدوم ؛ سائل خفيف → رذاذ كتير منتشر + بقع صغيرة
+        float visc = Mathf.Clamp01(viscosity);
+        sDrop *= Mathf.Lerp(2.6f, 0.05f, visc);         // سائل: رذاذ كتير جدًا / لزج: شبه لا شيء
+        float viscSize = Mathf.Lerp(0.6f, 2.3f, visc);  // لزج: بقعة أكبر بـ ~4 أضعاف
+
         float spreadMult = GetSpreadMult();
         int mainR = Mathf.Max(Mathf.RoundToInt(
             baseBrushSize
             * Mathf.Clamp(Mathf.Sqrt(speed) * speedToSizeMultiplier, 0.4f, 4f)
-            * spreadMult * sSpread), 1);
+            * spreadMult * sSpread * viscSize), 1);
 
         // الأثر حسب نوع السطح — لكل سطح بصمة بصرية واضحة
         DrawSurfaceMark(cx, cy, mainR, baseAng, forwardness, speed, baseCol, sSoft, sDrop);
@@ -1186,21 +1201,21 @@ public class PBFSolver : MonoBehaviour
         switch (paintType)
         {
             case PaintType.Watercolor:
-                restDensity = 3f; SIGMA = 0.04f; gravityScale = 0.9f; bucketInfluence = 0.6f; break;
+                restDensity = 3f; SIGMA = 0.04f; gravityScale = 0.9f; bucketInfluence = 0.6f; viscosity = 0.18f; break;
             case PaintType.Acrylic:
-                restDensity = 4.5f; SIGMA = 0.3f; gravityScale = 0.6f; bucketInfluence = 0.3f; break;
+                restDensity = 4.5f; SIGMA = 0.3f; gravityScale = 0.6f; bucketInfluence = 0.3f; viscosity = 0.44f; break;
             case PaintType.OilPaint:
-                restDensity = 6.5f; SIGMA = 0.85f; gravityScale = 0.4f; bucketInfluence = 0.12f; break;
+                restDensity = 6.5f; SIGMA = 0.85f; gravityScale = 0.4f; bucketInfluence = 0.12f; viscosity = 0.70f; break;
             case PaintType.Tempera:
-                restDensity = 3.8f; SIGMA = 0.15f; gravityScale = 0.75f; bucketInfluence = 0.45f; break;
+                restDensity = 3.8f; SIGMA = 0.15f; gravityScale = 0.75f; bucketInfluence = 0.45f; viscosity = 0.31f; break;
             case PaintType.Gouache:
-                restDensity = 5.5f; SIGMA = 0.55f; gravityScale = 0.5f; bucketInfluence = 0.2f; break;
+                restDensity = 5.5f; SIGMA = 0.55f; gravityScale = 0.5f; bucketInfluence = 0.2f; viscosity = 0.57f; break;
             case PaintType.Latex:
-                restDensity = 7.5f; SIGMA = 1.1f; gravityScale = 0.35f; bucketInfluence = 0.1f; break;
+                restDensity = 7.5f; SIGMA = 1.1f; gravityScale = 0.35f; bucketInfluence = 0.1f; viscosity = 0.95f; break;
             case PaintType.Enamel:
-                restDensity = 7f; SIGMA = 1.0f; gravityScale = 0.38f; bucketInfluence = 0.11f; break;
+                restDensity = 7f; SIGMA = 1.0f; gravityScale = 0.38f; bucketInfluence = 0.11f; viscosity = 0.83f; break;
             case PaintType.Ink:
-                restDensity = 2.5f; SIGMA = 0.02f; gravityScale = 0.95f; bucketInfluence = 0.7f; break;
+                restDensity = 2.5f; SIGMA = 0.02f; gravityScale = 0.95f; bucketInfluence = 0.7f; viscosity = 0.05f; break;
         }
     }
 

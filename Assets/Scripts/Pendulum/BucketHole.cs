@@ -100,7 +100,9 @@ public class BucketHole : MonoBehaviour
             float baseArea = Mathf.PI * (0.02f / 2f) * (0.02f / 2f);
             float areaFactor = holeArea / baseArea;
 
-            float rate = particlesPerSecond * spillFactor * areaFactor * velBoost * torricelliFactor;
+            // اللزوجة: الدهان اللزج يصبّ أبطأ بكتير من الفتحة (مضخّم)
+            float viscFlow = Mathf.Lerp(1.2f, 0.15f, Mathf.Clamp01(paintSim.viscosity));
+            float rate = particlesPerSecond * spillFactor * areaFactor * velBoost * torricelliFactor * viscFlow;
             spawnTimer += rate * dt;
 
             while (spawnTimer >= 1f)

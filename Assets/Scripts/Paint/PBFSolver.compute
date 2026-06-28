@@ -37,6 +37,7 @@ float bucketInfluence;
 float3 bucketAccel; // تسارع الدلو
 int particleCount;
 int maxNeighbors; // أقصى عدد جيران لكل جزيء
+float viscosity; // قوة اللزوجة (XSPH)
 
 // Bucket boundaries
 float3 bucketCenter;
@@ -418,4 +419,43 @@ void FallingStep(uint3 id : SV_DispatchThreadID)
     velocities[i].y -= gravity * dt;
     velocities[i] *= 0.995;
     positions[i] += velocities[i] * dt;
+}
+// ════════════════════════════════════════════════════════════════════
+//  Pass: ApplyViscosity (XSPH) — السائل اللزج يتحرك ككتلة متماسكة
+//  كل جزيء داخلي يأخذ جزءًا من متوسط سرعة جيرانه (يُشغّل بعد UpdateVelocity)
+// ════════════════════════════════════════════════════════════════════
+#pragma kernel ApplyViscosity
+
+[numthreads(256, 1, 1)]
+void ApplyViscosity(uint3 id : SV_DispatchThreadID)
+{
+    int i = (int) id.x;
+    if (i >= particleCount)
+        return;
+    if (states[i] != 0)
+        return; // داخل الدلو فقط
+
+    int baseIdx = i * maxNeighbors;
+    int cnt = neighborCount[i];
+    float hSq = h * h;
+
+    float3 vi = velocities[i];
+    float3 vSmooth = float3(0, 0, 0);
+    float wSum = 0.0;
+
+    for (int k = 0; k < cnt; k++)
+    {
+        int j = neighborList[baseIdx + k];
+        float3 d = positions[i] - positions[j];
+        float rSq = dot(d, d);
+        if (rSq < hSq)
+        {
+            float w = Poly6(rSq, hSq);
+            vSmooth += (velocities[j] - vi) * w;
+            wSum += w;
+        }
+    }
+
+    if (wSum > 0.0)
+        velocities[i] += viscosity * (vSmooth / wSum);
 }

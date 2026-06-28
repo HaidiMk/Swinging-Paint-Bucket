@@ -597,7 +597,7 @@ MonoBehaviour:
   holeHeightFromBottom: 0
   spillAngleThreshold: 5
   overflowAngleThreshold: 80
-  particlesPerSecond: 100
+  particlesPerSecond: 32
   overflowParticlesPerSecond: 50
   velocityBoostFactor: 1.75
   enableTorricelli: 1
@@ -623,8 +623,8 @@ MonoBehaviour:
   canvasTransform: {fileID: 829268569}
   canvasRenderer: {fileID: 829268567}
   pbfComputeShader: {fileID: 7200000, guid: d47f37d3181feb347ae1cae2b90d28e1, type: 3}
-  paintType: 1
-  surfaceType: 2
+  paintType: 0
+  surfaceType: 0
   maxParticles: 5000
   h: 0.18
   restDensity: 6
@@ -654,6 +654,7 @@ MonoBehaviour:
   gravityScale: 0.6
   bucketInfluence: 0.3
   SIGMA: 0.3
+  viscosity: 0.3
   saveFolder: C:\Users\Haidi\VR_Project
 --- !u!114 &967485742
 MonoBehaviour:
