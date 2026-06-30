@@ -597,13 +597,13 @@ MonoBehaviour:
   holeHeightFromBottom: 0
   spillAngleThreshold: 5
   overflowAngleThreshold: 80
-  particlesPerSecond: 32
-  overflowParticlesPerSecond: 50
+  particlesPerSecond: 100
+  overflowParticlesPerSecond: 33
   velocityBoostFactor: 1.75
   enableTorricelli: 1
   enableTrail: 0
   trailMinThickness: 1
-  trailMaxThickness: 3
+  trailMaxThickness: 4.6
   showLog: 1
   holeOpen: 1
 --- !u!114 &967485741
@@ -623,8 +623,10 @@ MonoBehaviour:
   canvasTransform: {fileID: 829268569}
   canvasRenderer: {fileID: 829268567}
   pbfComputeShader: {fileID: 7200000, guid: d47f37d3181feb347ae1cae2b90d28e1, type: 3}
-  paintType: 0
-  surfaceType: 0
+  paintType: 6
+  surfaceType: 2
+  enableSurfaceEffects: 1
+  surfaceEffectStrength: 0.65
   maxParticles: 5000
   h: 0.18
   restDensity: 6
@@ -650,6 +652,20 @@ MonoBehaviour:
   paintColor: {r: 0.9, g: 0.1, b: 0.1, a: 1}
   paintColorDark: {r: 0.5, g: 0.05, b: 0.05, a: 1}
   visualParticleSize: 0.015
+  enableLayeredPaintColors: 1
+  layerPaintColors:
+  - {r: 0.95, g: 0.05, b: 0.04, a: 1}
+  - {r: 0.05, g: 0.2, b: 1, a: 1}
+  - {r: 0.216981, g: 1, b: 0.56666416, a: 1}
+  - {r: 0.99559575, g: 1, b: 0.05098039, a: 1}
+  particlesPerLayer: 500
+  simpleLayerVisuals: 1
+  enableLightCanvasMixing: 1
+  canvasMixStrength: 1
+  paintDepositStrength: 0.85
+  canvasApplyEveryNFrames: 4
+  maxImpactsPerReadback: 30
+  verboseDebugLogs: 0
   showDebugGizmos: 1
   gravityScale: 0.6
   bucketInfluence: 0.3
@@ -791,7 +807,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::SphericalPendulum
   bucket: {fileID: 1410675181}
   pivot: {fileID: 1206993303}
-  paintSolver: {fileID: 0}
+  paintSolver: {fileID: 967485741}
   bucketMass: 1.2
   bucketRadius: 0.1
   dragCoefficient: 0.187

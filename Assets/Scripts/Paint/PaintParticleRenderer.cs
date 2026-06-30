@@ -10,7 +10,7 @@ public class PaintParticleRenderer : MonoBehaviour
     public Material material;                       // uses Custom/PaintParticleInstancedURP
 
     [Header("Look")]
-    [Range(0.01f, 0.3f)] public float particleScale = 0.06f;
+    [Range(0.01f, 0.3f)] public float particleScale = 0.035f;
 
     Mesh quadMesh;
     ComputeBuffer argsBuffer;
@@ -41,8 +41,11 @@ public class PaintParticleRenderer : MonoBehaviour
         material.SetVector("_BucketCenter", solver.BucketCenter);
         material.SetVector("_BucketUp", solver.BucketUpDir);
         material.SetFloat("_BucketHeight", solver.bucketWorldHeight);
-        material.SetColor("_PaintColor", solver.paintColor);
-        material.SetColor("_PaintColorDark", solver.paintColorDark);
+        Color current = solver.simpleLayerVisuals ? solver.CurrentPaintColor() : solver.paintColor;
+        Color dark = Color.Lerp(current, Color.black, 0.45f);
+        dark.a = current.a;
+        material.SetColor("_PaintColor", current);
+        material.SetColor("_PaintColorDark", dark);
 
         Graphics.DrawMeshInstancedIndirect(quadMesh, 0, material, bounds, argsBuffer);
     }
