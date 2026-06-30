@@ -597,7 +597,7 @@ MonoBehaviour:
   holeHeightFromBottom: 0
   spillAngleThreshold: 5
   overflowAngleThreshold: 80
-  particlesPerSecond: 100
+  particlesPerSecond: 10
   overflowParticlesPerSecond: 33
   velocityBoostFactor: 1.75
   enableTorricelli: 1
@@ -623,11 +623,11 @@ MonoBehaviour:
   canvasTransform: {fileID: 829268569}
   canvasRenderer: {fileID: 829268567}
   pbfComputeShader: {fileID: 7200000, guid: d47f37d3181feb347ae1cae2b90d28e1, type: 3}
-  paintType: 6
-  surfaceType: 2
+  paintType: 1
+  surfaceType: 1
   enableSurfaceEffects: 1
   surfaceEffectStrength: 0.65
-  maxParticles: 5000
+  maxParticles: 1000
   h: 0.18
   restDensity: 6
   solverIterations: 3
@@ -658,7 +658,7 @@ MonoBehaviour:
   - {r: 0.05, g: 0.2, b: 1, a: 1}
   - {r: 0.216981, g: 1, b: 0.56666416, a: 1}
   - {r: 0.99559575, g: 1, b: 0.05098039, a: 1}
-  particlesPerLayer: 500
+  particlesPerLayer: 225
   simpleLayerVisuals: 1
   enableLightCanvasMixing: 1
   canvasMixStrength: 1
@@ -666,6 +666,14 @@ MonoBehaviour:
   canvasApplyEveryNFrames: 4
   maxImpactsPerReadback: 30
   verboseDebugLogs: 0
+  enableParticleSloshing: 1
+  particleSloshStrength: 0.95
+  particleSloshResponse: 9
+  particleSloshDamping: 4.5
+  particleSloshForce: 4.2
+  particleSloshSurfaceSlope: 0.22
+  particleSloshSurfaceBias: 0.75
+  showParticleSloshGizmo: 1
   showDebugGizmos: 1
   gravityScale: 0.6
   bucketInfluence: 0.3

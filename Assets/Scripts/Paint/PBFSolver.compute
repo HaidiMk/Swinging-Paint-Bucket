@@ -35,9 +35,25 @@ float gravity;
 float gravityScale;
 float bucketInfluence;
 float3 bucketAccel; // تسارع الدلو
+
+// Particle sloshing inside bucket — تحريك الجزيئات نفسها داخل الدلو
+int enableParticleSloshing;
+float3 particleSloshVector; // اتجاه*قوة الميلان داخل الدلو
+float particleSloshForce; // دفع جانبي للجزيئات القريبة من السطح
+float particleSloshLiftForce; // رفع/خفض للجزيئات حتى يظهر الميل فعلياً
+float particleSloshSurfaceSlope; // ميل حد السطح الحر
+float particleSloshSurfaceBias; // وزن أكبر للجزيئات القريبة من السطح
+
 int particleCount;
 int maxNeighbors; // أقصى عدد جيران لكل جزيء
 float viscosity; // قوة اللزوجة (XSPH)
+
+// Cohesion / Surface tension — تماسك الجزيئات بدون تغيير PBF الأساسي
+int enableParticleCohesion;
+float particleCohesionStrength;
+float particleCohesionRadius;
+float particleCohesionRepulsion;
+float particleCohesionDamping;
 
 // Bucket boundaries
 float3 bucketCenter;
@@ -129,6 +145,33 @@ void PredictPositions(uint3 id : SV_DispatchThreadID)
         bucketF = bucketF / bfMag * 5.0;
 
     float3 externalForce = grav + bucketF;
+
+    if (enableParticleSloshing != 0)
+    {
+        float sloshMag = length(particleSloshVector);
+        if (sloshMag > 0.0001)
+        {
+            float3 offset = positions[i] - bucketCenter;
+            float vert = dot(offset, bucketUp);
+            float3 horizVec = offset - bucketUp * vert;
+            float denom = max(bucketTop - bucketBottom, 0.001);
+            float height01 = saturate((vert - bucketBottom) / denom);
+
+            // الجزيئات القريبة من سطح الطلاء تتحرك أكثر؛ الجزيئات السفلية أهدأ.
+            float surfaceWeight = lerp(1.0 - particleSloshSurfaceBias, 1.0, smoothstep(0.12, 1.0, height01));
+            float3 sloshDir = particleSloshVector / sloshMag;
+            float side = 0.0;
+            if (bucketRadius > 0.0001)
+                side = clamp(dot(horizVec, sloshDir) / bucketRadius, -1.0, 1.0);
+
+            // دفع جانبي واضح + رفع جهة وخفض الجهة المقابلة حتى تميل الجزيئات نفسها.
+            externalForce += particleSloshVector * particleSloshForce * surfaceWeight;
+            externalForce += bucketUp * (side * sloshMag * particleSloshLiftForce * surfaceWeight);
+
+            // خلط داخلي خفيف قرب السطح: يجعل السائل يتحرك كموجة لا كطبقة جامدة.
+            velocities[i] += sloshDir * (0.45 * sloshMag * surfaceWeight * dt);
+        }
+    }
 
     // PBF Prediction: x* = x + (v + f*dt)*dt
     velocities[i] += externalForce * dt;
@@ -370,6 +413,36 @@ void EnforceBoundary(uint3 id : SV_DispatchThreadID)
     float3 horizVec = offset - bucketUp * vert;
     float horizDist = length(horizVec);
 
+    float localBucketTop = bucketTop;
+    if (enableParticleSloshing != 0)
+    {
+        float sloshMag = length(particleSloshVector);
+        if (sloshMag > 0.0001 && bucketRadius > 0.0001)
+        {
+            float3 sloshDir = particleSloshVector / sloshMag;
+            float side = dot(horizVec, sloshDir) / bucketRadius;
+            // حد السطح الحر يصبح مائلاً: جهة ترتفع وجهة تنخفض، فتظهر حركة الجزيئات عند الجوانب.
+            localBucketTop = bucketTop + side * particleSloshSurfaceSlope * sloshMag;
+        }
+    }
+
+    // تشكيل بصري للجزيئات القريبة من السطح: رفع جهة وخفض الجهة الثانية داخل الدلو.
+    if (enableParticleSloshing != 0)
+    {
+        float sloshMag2 = length(particleSloshVector);
+        if (sloshMag2 > 0.0001 && bucketRadius > 0.0001)
+        {
+            float3 sloshDir2 = particleSloshVector / sloshMag2;
+            float side2 = clamp(dot(horizVec, sloshDir2) / bucketRadius, -1.0, 1.0);
+            float denom2 = max(bucketTop - bucketBottom, 0.001);
+            float height01b = saturate((vert - bucketBottom) / denom2);
+            float wTop = smoothstep(0.35, 1.0, height01b);
+            float targetOffset = side2 * particleSloshSurfaceSlope * sloshMag2 * wTop;
+            vert += targetOffset * 0.035; // صغير ومباشر حتى لا يسبب انفجاراً عددياً
+            horizVec += sloshDir2 * (sloshMag2 * wTop * 0.003);
+        }
+    }
+
     // الحد السفلي
     if (vert < bucketBottom)
     {
@@ -380,10 +453,10 @@ void EnforceBoundary(uint3 id : SV_DispatchThreadID)
             velocities[i] -= bucketUp * vy * 1.5;
     }
 
-    // الحد العلوي
-    if (vert > bucketTop)
+    // الحد العلوي — صار مائلاً مع sloshing بدل سقف أفقي ثابت
+    if (vert > localBucketTop)
     {
-        vert = bucketTop;
+        vert = localBucketTop;
         positions[i] = bucketCenter + horizVec + bucketUp * vert;
         float vy = dot(velocities[i], bucketUp);
         if (vy > 0)
@@ -459,3 +532,74 @@ void ApplyViscosity(uint3 id : SV_DispatchThreadID)
     if (wSum > 0.0)
         velocities[i] += viscosity * (vSmooth / wSum);
 }
+
+// ════════════════════════════════════════════════════════════════════
+//  Pass: ApplyCohesion — Surface Tension / Cohesion
+//  يجذب الجزيئات القريبة لبعضها بشكل خفيف حتى يظهر الطلاء ككتلة سائلة.
+//  لا يغير خوارزمية PBF الأساسية؛ هو force إضافي بعد اللزوجة.
+// ════════════════════════════════════════════════════════════════════
+#pragma kernel ApplyCohesion
+
+[numthreads(256, 1, 1)]
+void ApplyCohesion(uint3 id : SV_DispatchThreadID)
+{
+    int i = (int) id.x;
+    if (i >= particleCount)
+        return;
+    if (states[i] != 0)
+        return; // داخل الدلو فقط
+    if (enableParticleCohesion == 0 || particleCohesionStrength <= 0.0)
+        return;
+
+    int baseIdx = i * maxNeighbors;
+    int cnt = neighborCount[i];
+
+    float3 pi = positions[i];
+    float3 cohesionDir = float3(0, 0, 0);
+    float3 repelDir = float3(0, 0, 0);
+    float totalW = 0.0;
+
+    float radius = max(0.001, h * particleCohesionRadius);
+    float radiusSq = radius * radius;
+    float minDist = h * 0.28;
+
+    for (int k = 0; k < cnt; k++)
+    {
+        int j = neighborList[baseIdx + k];
+        if (j == i)
+            continue;
+
+        float3 d = positions[j] - pi;
+        float rSq = dot(d, d);
+        if (rSq <= 0.000001 || rSq > radiusSq)
+            continue;
+
+        float r = sqrt(rSq);
+        float3 dir = d / r;
+
+        // وزن أعلى للجيران القريبين من حافة مدى التأثير، يعطي شعور شدّ سطحي بدل تكتل حاد.
+        float q = saturate(r / radius);
+        float w = (1.0 - q);
+        w = w * w;
+
+        cohesionDir += dir * w;
+        totalW += w;
+
+        // منع التراكم الزائد عندما تصير الجزيئات قريبة جداً.
+        if (r < minDist)
+        {
+            float push = (1.0 - r / minDist);
+            repelDir -= dir * push;
+        }
+    }
+
+    if (totalW > 0.00001)
+    {
+        float3 force = (cohesionDir / totalW) * particleCohesionStrength;
+        force += repelDir * particleCohesionRepulsion;
+
+        velocities[i] += force * dt;
+        velocities[i] *= max(0.0, 1.0 - particleCohesionDamping * dt);
+    }
+}
+

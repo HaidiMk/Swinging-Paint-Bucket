@@ -125,6 +125,37 @@ public class PBFSolver : MonoBehaviour
     [Range(1, 200)] public int maxImpactsPerReadback = 30;
     public bool verboseDebugLogs = false;
 
+    [Header("Particle Sloshing Inside Bucket — حركة الجزيئات داخل الدلو")]
+    [Tooltip("يحرك الجزيئات نفسها داخل الدلو عند تبدل اتجاه الحركة، بدون إضافة سطح مرئي وهمي.")]
+    public bool enableParticleSloshing = true;
+
+    [Tooltip("قوة ميلان/اندفاع السائل داخل الدلو عند أقصى اليمين واليسار.")]
+    [Range(0f, 1.5f)] public float particleSloshStrength = 1.15f;
+
+    [Tooltip("سرعة استجابة السائل لتسارع الدلو. قيمة أعلى = يميل أسرع.")]
+    [Range(1f, 18f)] public float particleSloshResponse = 11.5f;
+
+    [Tooltip("تخميد التموّج. قيمة أعلى = اهتزاز أقل.")]
+    [Range(0.5f, 12f)] public float particleSloshDamping = 3.6f;
+
+    [Tooltip("قوة الدفع الجانبي للجزيئات قرب سطح السائل.")]
+    [Range(0f, 12f)] public float particleSloshForce = 5.8f;
+
+    [Tooltip("قوة رفع/خفض الجزيئات قرب الأطراف حتى يظهر السائل مائلاً فعلياً لا ككتلة مسطحة.")]
+    [Range(0f, 12f)] public float particleSloshLiftForce = 6.5f;
+
+    [Tooltip("تعزيز التموّج لحظة تغير الاتجاه عند أقصى اليمين/اليسار.")]
+    [Range(0f, 1.5f)] public float particleSloshTurnBoost = 0.55f;
+
+    [Tooltip("كم يسمح لمستوى الجزيئات أن يرتفع من جهة وينخفض من الجهة الأخرى.")]
+    [Range(0f, 0.45f)] public float particleSloshSurfaceSlope = 0.32f;
+
+    [Tooltip("يعزز تأثير التموّج على الجزيئات القريبة من سطح السائل أكثر من الجزيئات السفلية.")]
+    [Range(0f, 1f)] public float particleSloshSurfaceBias = 0.88f;
+
+    [Tooltip("إظهار سهم فقط لاتجاه اندفاع الجزيئات. لا يضيف سطح سائل مرئي.")]
+    public bool showParticleSloshGizmo = true;
+
     [Header("Debug")]
     public bool showDebugGizmos = true;
 
@@ -135,6 +166,22 @@ public class PBFSolver : MonoBehaviour
     [HideInInspector] public float bucketInfluence = 0.3f;
     [HideInInspector] public float SIGMA = 0.3f;
     [HideInInspector] public float viscosity = 0.3f; // تُضبط حسب نوع الدهان
+
+    [Header("Particle Cohesion — تماسك الجزيئات")]
+    [Tooltip("يجعل الجزيئات القريبة تنجذب لبعضها بشكل خفيف حتى يظهر الطلاء ككتلة سائلة لا كحبيبات منفصلة.")]
+    public bool enableParticleCohesion = true;
+
+    [Tooltip("قوة التماسك بين الجزيئات. ارفعها إذا كان السائل مفككاً، وخففها إذا صار مثل الجل.")]
+    [Range(0f, 8f)] public float particleCohesionStrength = 2.2f;
+
+    [Tooltip("مسافة تأثير التماسك بالنسبة إلى h. قيمة أكبر = تماسك أوسع لكن أبطأ قليلاً.")]
+    [Range(0.35f, 1.3f)] public float particleCohesionRadius = 0.85f;
+
+    [Tooltip("يمنع التكتل الزائد عندما تكون الجزيئات قريبة جداً.")]
+    [Range(0f, 2f)] public float particleCohesionRepulsion = 0.45f;
+
+    [Tooltip("تخميد إضافي بسيط يمنع اهتزاز كتلة السائل بعد إضافة التماسك.")]
+    [Range(0f, 4f)] public float particleCohesionDamping = 0.55f;
 
     // ══════════════════════════════════════════════════════════════
     //  GPU Buffers — كل البيانات على كرت الشاشة
@@ -163,6 +210,7 @@ public class PBFSolver : MonoBehaviour
     int kApplyViscosity;
     int kEnforceBoundary;
     int kFallingStep;
+    int kApplyCohesion;
 
     // ══════════════════════════════════════════════════════════════
     //  Grid
@@ -213,6 +261,10 @@ public class PBFSolver : MonoBehaviour
     // Dynamics
     Vector3 prevBucketVel = Vector3.zero;
     Vector3 bucketAccelWorld = Vector3.zero;
+
+    // Particle sloshing state: اتجاه وكمية ميلان الجزيئات داخل الدلو
+    Vector3 particleSloshVector = Vector3.zero;
+    Vector3 particleSloshVelocity = Vector3.zero;
 
     // Visual PS
     ParticleSystem visualPS;
@@ -338,6 +390,7 @@ public class PBFSolver : MonoBehaviour
         kApplyViscosity = pbfComputeShader.FindKernel("ApplyViscosity");
         kEnforceBoundary = pbfComputeShader.FindKernel("EnforceBoundary");
         kFallingStep = pbfComputeShader.FindKernel("FallingStep");
+        kApplyCohesion = pbfComputeShader.FindKernel("ApplyCohesion");
 
         // اربط الـ Buffers بكل الـ kernels
         BindAllBuffers();
@@ -361,7 +414,8 @@ public class PBFSolver : MonoBehaviour
             kPredictPositions, kClearGrid, kFillGrid,
             kFindNeighbors, kSolveConstraints, kApplyCorrection,
             kUpdateVelocity, kEnforceBoundary, kFallingStep,
-            kApplyViscosity
+            kApplyViscosity,
+            kApplyCohesion
         };
 
         foreach (int k in kernels)
@@ -444,6 +498,8 @@ public class PBFSolver : MonoBehaviour
             bucketAccelWorld *= (1f - fp);
         }
 
+        UpdateParticleSloshing(dt);
+
         // تحديث Constants في الـ Compute Shader
         SetShaderConstants(dt);
 
@@ -473,6 +529,10 @@ public class PBFSolver : MonoBehaviour
         if (viscosity > 0f)
             Dispatch(kApplyViscosity);
 
+        // Pass 4ج: تماسك سطحي بين الجزيئات حتى لا يظهر السائل كحبيبات منفصلة
+        if (enableParticleCohesion && particleCohesionStrength > 0f)
+            Dispatch(kApplyCohesion);
+
         // Pass 5: حدود الدلو
         Dispatch(kEnforceBoundary);
 
@@ -488,6 +548,53 @@ public class PBFSolver : MonoBehaviour
             CPUReadback(); // أول مرة نشتغل فيها — نجبر readback فوري
 
         visualDirty = true;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //  UpdateParticleSloshing — يميل الجزيئات نفسها داخل الدلو
+    // ════════════════════════════════════════════════════════════════
+    void UpdateParticleSloshing(float dt)
+    {
+        if (!enableParticleSloshing || bucketTransform == null)
+        {
+            particleSloshVector = Vector3.Lerp(particleSloshVector, Vector3.zero, Mathf.Clamp01(dt * 8f));
+            particleSloshVelocity = Vector3.Lerp(particleSloshVelocity, Vector3.zero, Mathf.Clamp01(dt * 8f));
+            return;
+        }
+
+        Vector3 up = BucketUp;
+
+        // السائل لا يتبع الدلو فوراً: ندمج بين القوة الوهمية الناتجة عن التسارع
+        // وبين lag بسيط عكس سرعة الدلو، فيظهر التموّج خصوصاً عند أقصى اليمين/اليسار.
+        Vector3 lateralPseudo = Vector3.ProjectOnPlane(-bucketAccelWorld, up);
+        Vector3 bucketVel = pendulum != null ? pendulum.GetBucketVelocity() : Vector3.zero;
+        Vector3 lateralVel = Vector3.ProjectOnPlane(bucketVel, up);
+
+        Vector3 sloshDrive = lateralPseudo;
+        if (lateralVel.sqrMagnitude > 0.0001f)
+            sloshDrive += -lateralVel * 0.35f; // تأخر السائل عن حركة الدلو
+
+        float accelMag = lateralPseudo.magnitude;
+        float velMag = lateralVel.magnitude;
+        float turnBoost = Mathf.InverseLerp(0.85f, 0.05f, velMag) * Mathf.InverseLerp(1.0f, 8.0f, accelMag) * particleSloshTurnBoost;
+        float mag = sloshDrive.magnitude;
+
+        Vector3 desired = Vector3.zero;
+        if (mag > 0.03f)
+        {
+            float amount = Mathf.InverseLerp(0.18f, 7.0f, mag) * particleSloshStrength;
+            amount = Mathf.Clamp01(amount + turnBoost);
+            desired = sloshDrive.normalized * amount;
+        }
+
+        // نموذج نابضي: يعطي قصور ذاتي وovershoot بدل حركة جامدة.
+        Vector3 error = desired - particleSloshVector;
+        particleSloshVelocity += error * particleSloshResponse * dt;
+        particleSloshVelocity *= Mathf.Exp(-particleSloshDamping * dt);
+        particleSloshVector += particleSloshVelocity * dt;
+
+        if (particleSloshVector.magnitude > 1f)
+            particleSloshVector = particleSloshVector.normalized;
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -507,7 +614,18 @@ public class PBFSolver : MonoBehaviour
         pbfComputeShader.SetFloat("gravityScale", gravityScale);
         pbfComputeShader.SetFloat("bucketInfluence", bucketInfluence);
         pbfComputeShader.SetFloat("viscosity", viscosity);
+        pbfComputeShader.SetInt("enableParticleCohesion", enableParticleCohesion ? 1 : 0);
+        pbfComputeShader.SetFloat("particleCohesionStrength", particleCohesionStrength);
+        pbfComputeShader.SetFloat("particleCohesionRadius", particleCohesionRadius);
+        pbfComputeShader.SetFloat("particleCohesionRepulsion", particleCohesionRepulsion);
+        pbfComputeShader.SetFloat("particleCohesionDamping", particleCohesionDamping);
         pbfComputeShader.SetVector("bucketAccel", bucketAccelWorld);
+        pbfComputeShader.SetInt("enableParticleSloshing", enableParticleSloshing ? 1 : 0);
+        pbfComputeShader.SetVector("particleSloshVector", particleSloshVector);
+        pbfComputeShader.SetFloat("particleSloshForce", particleSloshForce);
+        pbfComputeShader.SetFloat("particleSloshLiftForce", particleSloshLiftForce);
+        pbfComputeShader.SetFloat("particleSloshSurfaceSlope", particleSloshSurfaceSlope);
+        pbfComputeShader.SetFloat("particleSloshSurfaceBias", particleSloshSurfaceBias);
         pbfComputeShader.SetInt("particleCount", maxParticles);
         pbfComputeShader.SetInt("maxNeighbors", MAX_NEIGHBORS);
         pbfComputeShader.SetInt("maxPerCell", MAX_PER_CELL);
@@ -1530,6 +1648,17 @@ public class PBFSolver : MonoBehaviour
         }
         Gizmos.color = Color.yellow;
         Gizmos.DrawWireSphere(HolePosition, 0.025f);
+
+
+        if (showParticleSloshGizmo && enableParticleSloshing && bucketTransform != null && particleSloshVector.sqrMagnitude > 0.0001f)
+        {
+            Gizmos.color = Color.magenta;
+            Vector3 sloshCenter = BucketCenter;
+            Vector3 dir = particleSloshVector.normalized;
+            float len = bucketWorldRadius * Mathf.Lerp(0.3f, 1.4f, Mathf.Clamp01(particleSloshVector.magnitude));
+            Gizmos.DrawLine(sloshCenter, sloshCenter + dir * len);
+            Gizmos.DrawSphere(sloshCenter + dir * len, bucketWorldRadius * 0.06f);
+        }
     }
 
     GUIStyle hudStyle; Texture2D hudBg;
