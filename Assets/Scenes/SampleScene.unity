@@ -623,11 +623,11 @@ MonoBehaviour:
   canvasTransform: {fileID: 829268569}
   canvasRenderer: {fileID: 829268567}
   pbfComputeShader: {fileID: 7200000, guid: d47f37d3181feb347ae1cae2b90d28e1, type: 3}
-  paintType: 1
-  surfaceType: 1
+  paintType: 0
+  surfaceType: 0
   enableSurfaceEffects: 1
   surfaceEffectStrength: 0.65
-  maxParticles: 1000
+  maxParticles: 5000
   h: 0.18
   restDensity: 6
   solverIterations: 3
@@ -657,12 +657,11 @@ MonoBehaviour:
   - {r: 0.95, g: 0.05, b: 0.04, a: 1}
   - {r: 0.05, g: 0.2, b: 1, a: 1}
   - {r: 0.216981, g: 1, b: 0.56666416, a: 1}
-  - {r: 0.99559575, g: 1, b: 0.05098039, a: 1}
-  particlesPerLayer: 225
+  particlesPerLayer: 500
   simpleLayerVisuals: 1
   enableLightCanvasMixing: 1
-  canvasMixStrength: 1
-  paintDepositStrength: 0.85
+  canvasMixStrength: 0.95
+  paintDepositStrength: 0.77
   canvasApplyEveryNFrames: 4
   maxImpactsPerReadback: 30
   verboseDebugLogs: 0
@@ -671,6 +670,8 @@ MonoBehaviour:
   particleSloshResponse: 9
   particleSloshDamping: 4.5
   particleSloshForce: 4.2
+  particleSloshLiftForce: 6.5
+  particleSloshTurnBoost: 0.55
   particleSloshSurfaceSlope: 0.22
   particleSloshSurfaceBias: 0.75
   showParticleSloshGizmo: 1
@@ -679,6 +680,11 @@ MonoBehaviour:
   bucketInfluence: 0.3
   SIGMA: 0.3
   viscosity: 0.3
+  enableParticleCohesion: 1
+  particleCohesionStrength: 2.2
+  particleCohesionRadius: 0.85
+  particleCohesionRepulsion: 0.45
+  particleCohesionDamping: 0.55
   saveFolder: C:\Users\Haidi\VR_Project
 --- !u!114 &967485742
 MonoBehaviour:

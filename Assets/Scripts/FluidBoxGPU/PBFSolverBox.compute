@@ -62,6 +62,11 @@ float bucketRadius;
 float bucketTop;
 float bucketBottom;
 
+// ── وضع الديمو: صندوق (متوازي مستطيلات) ──
+float3 bucketRight; // محور X للصندوق
+float3 bucketForward; // محور Z للصندوق
+float3 boxHalfExtents; // أنصاف أبعاد الصندوق (x,y,z)
+
 // Spatial Hash Grid dimensions
 int gridSizeX;
 int gridSizeY;
@@ -475,6 +480,80 @@ void EnforceBoundary(uint3 id : SV_DispatchThreadID)
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  Pass 6ب: EnforceBoundaryBox — حدود متوازي مستطيلات (وضع الديمو)
+//  نفس معالجة السائل تمامًا؛ فقط الجدران تصير مستطيلة بدل دائرية.
+//  يقصّ الجزيء على AABB في إطار الصندوق (bucketRight/Up/Forward).
+// ════════════════════════════════════════════════════════════════════
+#pragma kernel EnforceBoundaryBox
+
+[numthreads(256, 1, 1)]
+void EnforceBoundaryBox(uint3 id : SV_DispatchThreadID)
+{
+    int i = (int) id.x;
+    if (i >= particleCount)
+        return;
+    if (states[i] != 0)
+        return;
+
+    float3 offset = positions[i] - bucketCenter;
+    // مكوّنات الموقع على محاور الصندوق
+    float lx = dot(offset, bucketRight);
+    float ly = dot(offset, bucketUp);
+    float lz = dot(offset, bucketForward);
+
+    float3 v = velocities[i];
+
+    // محور X
+    if (lx < -boxHalfExtents.x)
+    {
+        lx = -boxHalfExtents.x;
+        float p = dot(v, bucketRight);
+        if (p < 0)
+            v -= bucketRight * p * 1.2;
+    }
+    else if (lx > boxHalfExtents.x)
+    {
+        lx = boxHalfExtents.x;
+        float p = dot(v, bucketRight);
+        if (p > 0)
+            v -= bucketRight * p * 1.2;
+    }
+    // محور Y (رأسي — أرضية أقوى)
+    if (ly < -boxHalfExtents.y)
+    {
+        ly = -boxHalfExtents.y;
+        float p = dot(v, bucketUp);
+        if (p < 0)
+            v -= bucketUp * p * 1.5;
+    }
+    else if (ly > boxHalfExtents.y)
+    {
+        ly = boxHalfExtents.y;
+        float p = dot(v, bucketUp);
+        if (p > 0)
+            v -= bucketUp * p;
+    }
+    // محور Z
+    if (lz < -boxHalfExtents.z)
+    {
+        lz = -boxHalfExtents.z;
+        float p = dot(v, bucketForward);
+        if (p < 0)
+            v -= bucketForward * p * 1.2;
+    }
+    else if (lz > boxHalfExtents.z)
+    {
+        lz = boxHalfExtents.z;
+        float p = dot(v, bucketForward);
+        if (p > 0)
+            v -= bucketForward * p * 1.2;
+    }
+
+    positions[i] = bucketCenter + bucketRight * lx + bucketUp * ly + bucketForward * lz;
+    velocities[i] = v;
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  Pass 7: FallingStep
 //  الجزيئات الساقطة — سقوط حر بسيط على GPU
 // ════════════════════════════════════════════════════════════════════
@@ -602,3 +681,4 @@ void ApplyCohesion(uint3 id : SV_DispatchThreadID)
         velocities[i] *= max(0.0, 1.0 - particleCohesionDamping * dt);
     }
 }
+
