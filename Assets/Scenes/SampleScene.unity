@@ -627,8 +627,10 @@ MonoBehaviour:
   surfaceType: 0
   enableSurfaceEffects: 1
   surfaceEffectStrength: 0.65
-  maxParticles: 5000
-  h: 0.18
+  maxParticles: 20000
+  h: 0.06
+  autoComputeH: 1
+  targetNeighborCount: 30
   restDensity: 6
   solverIterations: 3
   epsilon: 600
@@ -657,6 +659,7 @@ MonoBehaviour:
   - {r: 0.95, g: 0.05, b: 0.04, a: 1}
   - {r: 0.05, g: 0.2, b: 1, a: 1}
   - {r: 0.216981, g: 1, b: 0.56666416, a: 1}
+  - {r: 0.9465782, g: 1, b: 0.3830188, a: 1}
   particlesPerLayer: 500
   simpleLayerVisuals: 1
   enableLightCanvasMixing: 1

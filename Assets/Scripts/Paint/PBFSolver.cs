@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using System.Runtime.InteropServices;
+using System.Collections.Generic;
 
 // ════════════════════════════════════════════════════════════════════
 //  PBFSolver.cs  v1.0
@@ -56,7 +57,12 @@ public class PBFSolver : MonoBehaviour
 
     [Tooltip("نصف قطر التأثير بين الجزيئات")]
     [Range(0.05f, 0.3f)]
-    public float h = 0.18f;
+    public float h = 0.06f;
+
+    [Tooltip("احسب h تلقائيًا حسب عدد الجزيئات وحجم الدلو (بدل ما تظبطها يدوي كل مرة)")]
+    public bool autoComputeH = true;
+    [Tooltip("عدد الجيران المستهدف لكل جزيء لما autoComputeH مفعّل")]
+    public int targetNeighborCount = 42;
 
     [Tooltip("الكثافة الطبيعية للسائل — أكبر = أكثف")]
     [Range(1f, 20f)]
@@ -64,7 +70,7 @@ public class PBFSolver : MonoBehaviour
 
     [Tooltip("عدد iterations لحل الـ constraints — أكثر = أدق وأبطأ")]
     [Range(1, 10)]
-    public int solverIterations = 2;
+    public int solverIterations = 5;
 
     [Tooltip("ε لتجنب القسمة على صفر في معادلة λ")]
     public float epsilon = 600f;
@@ -211,6 +217,7 @@ public class PBFSolver : MonoBehaviour
     int kEnforceBoundary;
     int kFallingStep;
     int kApplyCohesion;
+    int kClampPredicted;
 
     // ══════════════════════════════════════════════════════════════
     //  Grid
@@ -218,8 +225,8 @@ public class PBFSolver : MonoBehaviour
     int gridSizeX, gridSizeY, gridSizeZ;
     Vector3 gridOrigin;
     float cellSize;
-    const int MAX_PER_CELL = 32;
-    const int MAX_NEIGHBORS = 64;
+    const int MAX_PER_CELL = 128;   // مهم جداً فوق 15K: يمنع overflow داخل خلايا الـ grid
+    const int MAX_NEIGHBORS = 128;  // فوق 15K الجزيئة قد ترى أكثر من 64 جار
     int totalCells;
 
     // ══════════════════════════════════════════════════════════════
@@ -295,6 +302,24 @@ public class PBFSolver : MonoBehaviour
     public Vector3 BucketUpDir => BucketUp;
 
     // ════════════════════════════════════════════════════════════════
+    // بيحسب h تلقائيًا حتى عدد الجيران المتوقع لكل جزيء يضل قريب من targetNeighborCount
+    // مهما تغيّر عدد الجزيئات (maxParticles) — بدل ما نحسبها يدوي كل مرة.
+    // القانون: عدد الجيران ≈ (N/V) × (4/3 × π × h³)  →  نعكسها لنحل h
+    void AutoComputeH()
+    {
+        if (!autoComputeH) return;
+
+        float rMax = bucketWorldRadius * 0.9f;      // نفس نطاق نصف القطر بـ SpawnParticles
+        float heightSpan = bucketWorldHeight * 0.6f; // نفس نطاق الارتفاع بـ SpawnParticles (0.45+0.15)
+        float volume = Mathf.PI * rMax * rMax * heightSpan;
+        float density = maxParticles / Mathf.Max(volume, 0.0001f);
+
+        float sphereVolumeNeeded = targetNeighborCount / Mathf.Max(density, 0.0001f);
+        h = Mathf.Pow(sphereVolumeNeeded / (4f / 3f * Mathf.PI), 1f / 3f);
+
+        Debug.Log($"[PBFSolver] h تلقائي = {h:F4} (جيران مستهدفة={targetNeighborCount}, كثافة={density:F0} جزيء/م3)");
+    }
+
     void Start()
     {
         if (pbfComputeShader == null)
@@ -303,12 +328,14 @@ public class PBFSolver : MonoBehaviour
             return;
         }
 
+        AutoComputeH();   // لازم قبل InitGrid لأنو الشبكة بتعتمد على h
         ApplyPaintType();
         InitGrid();
         InitGPUBuffers();
         InitCanvas();
         // InitVisualPS();   // ← off: replaced by GPU instanced renderer (PaintParticleRenderer)
         SpawnParticles();
+        CalibrateRestDensityScale();   // يصحّح restDensity حسب h والكثافة الفعلية (يحافظ على نسب أنواع الطلاء)
 
         initialized = true;
         Debug.Log($"[PBFSolver] Initialized — Particles={maxParticles} | GPU=RTX2050 | Iterations={solverIterations}");
@@ -391,6 +418,7 @@ public class PBFSolver : MonoBehaviour
         kEnforceBoundary = pbfComputeShader.FindKernel("EnforceBoundary");
         kFallingStep = pbfComputeShader.FindKernel("FallingStep");
         kApplyCohesion = pbfComputeShader.FindKernel("ApplyCohesion");
+        kClampPredicted = pbfComputeShader.FindKernel("ClampPredicted");
 
         // اربط الـ Buffers بكل الـ kernels
         BindAllBuffers();
@@ -415,7 +443,7 @@ public class PBFSolver : MonoBehaviour
             kFindNeighbors, kSolveConstraints, kApplyCorrection,
             kUpdateVelocity, kEnforceBoundary, kFallingStep,
             kApplyViscosity,
-            kApplyCohesion
+            kApplyCohesion, kClampPredicted
         };
 
         foreach (int k in kernels)
@@ -436,6 +464,57 @@ public class PBFSolver : MonoBehaviour
     // ════════════════════════════════════════════════════════════════
     //  SpawnParticles — ينشئ الجزيئات على CPU ثم يرفعها للـ GPU
     // ════════════════════════════════════════════════════════════════
+    // ── يصحّح restDensity حسب الكثافة الحقيقية (Poly6) لتوزيع الجزيئات الفعلي و h الحالي ──
+    // بدل ما نستبدل القيمة اليدوية (يلي فيها فرق بين أنواع الطلاء)، منحسب "نسبة تصحيح"
+    // ونضربها بالقيمة الحالية — هيك منحافظ على الفرق بين watercolor/oil/... الخ.
+    void CalibrateRestDensityScale()
+    {
+        float poly6C = 315f / (64f * Mathf.PI * Mathf.Pow(h, 9));
+        float hSq = h * h;
+
+        // شبكة بسيطة على الـ CPU (بدل مقارنة كل جزيء بكل الجزيئات — كانت بطيئة كتير
+        // وبتعلّق Unity مع عدد كبير من الجزيئات، لأنها O(n^2))
+        var cellMap = new Dictionary<Vector3Int, List<int>>();
+        Vector3Int CellOf(Vector3 p) => new Vector3Int(
+            Mathf.FloorToInt(p.x / h), Mathf.FloorToInt(p.y / h), Mathf.FloorToInt(p.z / h));
+
+        for (int i = 0; i < maxParticles; i++)
+        {
+            var c = CellOf(positionsCPU[i]);
+            if (!cellMap.TryGetValue(c, out var list))
+            {
+                list = new List<int>();
+                cellMap[c] = list;
+            }
+            list.Add(i);
+        }
+
+        float sum = 0f;
+        for (int i = 0; i < maxParticles; i++)
+        {
+            float rho = 0f;
+            Vector3Int c = CellOf(positionsCPU[i]);
+            for (int dx = -1; dx <= 1; dx++)
+                for (int dy = -1; dy <= 1; dy++)
+                    for (int dz = -1; dz <= 1; dz++)
+                    {
+                        var nc = new Vector3Int(c.x + dx, c.y + dy, c.z + dz);
+                        if (!cellMap.TryGetValue(nc, out var neighbors)) continue;
+                        foreach (int j in neighbors)
+                        {
+                            float r2 = (positionsCPU[i] - positionsCPU[j]).sqrMagnitude;
+                            if (r2 < hSq)
+                                rho += poly6C * Mathf.Pow(hSq - r2, 3);
+                        }
+                    }
+            sum += rho;
+        }
+        float measuredDensity = sum / maxParticles;
+        float scale = measuredDensity / Mathf.Max(0.01f, restDensity);
+        restDensity *= scale;
+        Debug.Log($"[PBFSolver] restDensity بعد التصحيح = {restDensity:F2} (نسبة التصحيح ×{scale:F2})");
+    }
+
     void SpawnParticles()
     {
         Vector3[] initPos = new Vector3[maxParticles];
@@ -446,34 +525,82 @@ public class PBFSolver : MonoBehaviour
         Vector3 center = BucketCenter;
         Vector3 up = BucketUp, right = BucketRight, fwd = BucketForward;
 
-        for (int i = 0; i < maxParticles; i++)
-        {
-            float a = Random.Range(0f, Mathf.PI * 2f);
-            float r = Random.Range(0f, bucketWorldRadius * 0.9f);
-            float ht = Random.Range(-bucketWorldHeight * 0.45f, bucketWorldHeight * 0.15f);
+        // توزيع FluidBox-style: شبكة طبقات منتظمة داخل أسطوانة الدلو بدل Random.
+        // السبب: فوق 15K أي تكتل عشوائي بسيط يعمل ضغط زائد وخلايا grid مزدحمة، فيظهر الانفجار.
+        float radius = bucketWorldRadius * 0.86f;
+        float bottom = -bucketWorldHeight * 0.45f + h * 0.55f;
+        float top = bucketWorldHeight * 0.15f - h * 0.35f;
+        float height = Mathf.Max(top - bottom, h * 2f);
 
-            initPos[i] = center
-                       + right * (Mathf.Cos(a) * r)
-                       + fwd * (Mathf.Sin(a) * r)
-                       + up * ht;
-            initVel[i] = Vector3.zero;
-            initSt[i] = INSIDE;
-            initLayer[i] = InitialLayerForParticle(i, ht);
+        float volume = Mathf.PI * radius * radius * height;
+        float spacing = Mathf.Pow(volume / Mathf.Max(1, maxParticles), 1f / 3f) * 0.92f;
+        spacing = Mathf.Clamp(spacing, h * 0.42f, h * 0.78f);
+
+        int count = 0;
+
+        // نحاول نملأ بشكل منتظم. إذا لم يكفِ العدد نقلل المسافة قليلاً ونعيد.
+        for (int attempt = 0; attempt < 6 && count < maxParticles; attempt++)
+        {
+            count = 0;
+            int layer = 0;
+            float s = spacing * Mathf.Pow(0.92f, attempt);
+            float rowH = s * 0.8660254f;       // hex spacing in XZ
+            float layerH = s * 0.92f;
+
+            for (float y = bottom; y <= top && count < maxParticles; y += layerH, layer++)
+            {
+                int zi = 0;
+                for (float z = -radius; z <= radius && count < maxParticles; z += rowH, zi++)
+                {
+                    float zOff = ((zi + layer) & 1) == 0 ? 0f : s * 0.5f;
+                    for (float x = -radius + zOff; x <= radius && count < maxParticles; x += s)
+                    {
+                        if (x * x + z * z > radius * radius) continue;
+
+                        // jitter صغير جداً حتى لا تظهر الجزيئات كشبكة صلبة، لكنه لا يسبب تداخل عشوائي.
+                        float jx = Random.Range(-0.035f, 0.035f) * s;
+                        float jy = Random.Range(-0.020f, 0.020f) * s;
+                        float jz = Random.Range(-0.035f, 0.035f) * s;
+
+                        float lx = x + jx;
+                        float ly = y + jy;
+                        float lz = z + jz;
+
+                        initPos[count] = center + right * lx + fwd * lz + up * ly;
+                        initVel[count] = Vector3.zero;
+                        initSt[count] = INSIDE;
+                        initLayer[count] = InitialLayerForParticle(count, ly);
+                        count++;
+                    }
+                }
+            }
         }
 
-        // احتفظ بنسخة CPU محدثة حتى لا نعمل GetData عند كل قطرة
+        // fallback فقط إذا كانت الإعدادات ضيقة جداً. نضيف نقاطاً منتظمة شبه عشوائية بدون تكديس بالمركز.
+        int guard = 0;
+        while (count < maxParticles && guard++ < maxParticles * 4)
+        {
+            float a = Random.Range(0f, Mathf.PI * 2f);
+            float r = radius * Mathf.Sqrt(Random.Range(0f, 1f));
+            float y = Random.Range(bottom, top);
+            initPos[count] = center + right * (Mathf.Cos(a) * r) + fwd * (Mathf.Sin(a) * r) + up * y;
+            initVel[count] = Vector3.zero;
+            initSt[count] = INSIDE;
+            initLayer[count] = InitialLayerForParticle(count, y);
+            count++;
+        }
+
         positionsCPU = initPos;
         velocitiesCPU = initVel;
         statesCPU = initSt;
         colorLayerCPU = initLayer;
         releasedPaintParticles = 0;
 
-        // رفع البيانات من CPU → GPU
         positionsBuffer.SetData(initPos);
         velocitiesBuffer.SetData(initVel);
         statesBuffer.SetData(initSt);
 
-        Debug.Log($"[PBF] Spawned {maxParticles} particles → GPU");
+        Debug.Log($"[PBF] Spawned {maxParticles} particles with stable lattice spacing={spacing:F4} → GPU");
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -507,6 +634,7 @@ public class PBFSolver : MonoBehaviour
 
         // Pass 0: توقع المواقع الجديدة
         Dispatch(kPredictPositions);
+        Dispatch(kClampPredicted);   // قصّ فوري بعد التوقع، قبل بناء الـ grid
 
         // Pass 1: بناء الشبكة المكانية
         DispatchGrid(kClearGrid);   // ClearGrid يعمل على totalCells وليس maxParticles
@@ -520,6 +648,7 @@ public class PBFSolver : MonoBehaviour
         {
             Dispatch(kSolveConstraints);
             Dispatch(kApplyCorrection);
+            Dispatch(kClampPredicted);   // يطبّق التصحيح على predictedPos ويقصّه كل iteration
         }
 
         // Pass 4: تحديث السرعة والموقع

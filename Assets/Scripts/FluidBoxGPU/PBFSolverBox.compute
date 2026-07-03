@@ -31,10 +31,10 @@ float dt;
 float h; // نصف قطر التأثير (smoothing length)
 float restDensity; // الكثافة الطبيعية للسائل ρ₀
 float epsilon; // ε لـ CFM (Constraint Force Mixing)
-float gravity;
-float gravityScale;
 float bucketInfluence;
-float3 bucketAccel; // تسارع الدلو
+float gravity; // يستخدمها FallingStep بس (حالة سقوط غير مستعملة بهالديمو)
+float3 gravityLocal; // الجاذبية محوّلة لإحداثيات الصندوق المحلية (من C#)
+float3 bucketAccelLocal; // تسارع الصندوق محوّل لإحداثيات محلية (من C#)
 
 // Particle sloshing inside bucket — تحريك الجزيئات نفسها داخل الدلو
 int enableParticleSloshing;
@@ -140,9 +140,9 @@ void PredictPositions(uint3 id : SV_DispatchThreadID)
     if (states[i] != 0)
         return; // 0 = INSIDE
 
-    // القوى الخارجية: جاذبية + تأثير حركة الدلو
-    float3 grav = float3(0, -gravity * gravityScale, 0);
-    float3 bucketF = -bucketAccel * bucketInfluence;
+    // القوى الخارجية: جاذبية + تأثير حركة الدلو (الاثنين محوّلين مسبقًا لإحداثيات محلية بـ C#)
+    float3 grav = gravityLocal;
+    float3 bucketF = -bucketAccelLocal * bucketInfluence;
 
     // تخفيف قوة الدلو إذا زادت عن حد
     float bfMag = length(bucketF);
@@ -387,7 +387,7 @@ void UpdateVelocity(uint3 id : SV_DispatchThreadID)
     if (states[i] != 0)
         return;
 
-    float3 newPos = predictedPos[i] + deltaPos[i];
+    float3 newPos = predictedPos[i]; // التصحيح متطبّق أصلاً (بـ ClampPredictedBox)
 
     velocities[i] = (newPos - positions[i]) / max(dt, 0.0001);
     positions[i] = newPos;
@@ -455,7 +455,7 @@ void EnforceBoundary(uint3 id : SV_DispatchThreadID)
         positions[i] = bucketCenter + horizVec + bucketUp * vert;
         float vy = dot(velocities[i], bucketUp);
         if (vy < 0)
-            velocities[i] -= bucketUp * vy * 1.5;
+            velocities[i] -= bucketUp * vy; // امتصاص كامل، بلا ارتداد (كان *1.5)
     }
 
     // الحد العلوي — صار مائلاً مع sloshing بدل سقف أفقي ثابت
@@ -475,8 +475,37 @@ void EnforceBoundary(uint3 id : SV_DispatchThreadID)
         positions[i] = bucketCenter + radDir * bucketRadius + bucketUp * vert;
         float vRad = dot(velocities[i], radDir);
         if (vRad > 0)
-            velocities[i] -= radDir * vRad * 1.2;
+            velocities[i] -= radDir * vRad; // امتصاص كامل، بلا ارتداد (كان *1.2)
     }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  ClampPredictedBox — يقصّ predictedPos على حدود الصندوق فقط (بلا سرعة)
+//  نفس فكرة ClampToBox بـ FluidBox.cs — بينشغّل بعد كل iteration من حل
+//  الـ PBF، مش مرة وحدة بآخر الفريم متل EnforceBoundaryBox.
+// ════════════════════════════════════════════════════════════════════
+#pragma kernel ClampPredictedBox
+
+[numthreads(256, 1, 1)]
+void ClampPredictedBox(uint3 id : SV_DispatchThreadID)
+{
+    int i = (int) id.x;
+    if (i >= particleCount)
+        return;
+    if (states[i] != 0)
+        return;
+
+    // طبّق تصحيح الـ iteration الحالية على predictedPos (كانت هاي الخطوة الناقصة —
+    // بدونها كل iteration كانت تحسب من نفس الموقع الأصلي غير المصحَّح).
+    predictedPos[i] += deltaPos[i];
+    deltaPos[i] = float3(0, 0, 0);
+
+    // إحداثيات محلية جاهزة — قصّ مباشر بلا أي تحويل (بلا دوران الصندوق يأثّر هون)
+    float3 p = predictedPos[i];
+    p.x = clamp(p.x, -boxHalfExtents.x, boxHalfExtents.x);
+    p.y = clamp(p.y, -boxHalfExtents.y, boxHalfExtents.y);
+    p.z = clamp(p.z, -boxHalfExtents.z, boxHalfExtents.z);
+    predictedPos[i] = p;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -495,61 +524,50 @@ void EnforceBoundaryBox(uint3 id : SV_DispatchThreadID)
     if (states[i] != 0)
         return;
 
-    float3 offset = positions[i] - bucketCenter;
-    // مكوّنات الموقع على محاور الصندوق
-    float lx = dot(offset, bucketRight);
-    float ly = dot(offset, bucketUp);
-    float lz = dot(offset, bucketForward);
-
+    float3 p = positions[i];
     float3 v = velocities[i];
 
-    // محور X
-    if (lx < -boxHalfExtents.x)
+    // إحداثيات محلية جاهزة — قصّ مباشر على كل محور + امتصاص كامل للسرعة (بلا ارتداد)
+    if (p.x < -boxHalfExtents.x)
     {
-        lx = -boxHalfExtents.x;
-        float p = dot(v, bucketRight);
-        if (p < 0)
-            v -= bucketRight * p * 1.2;
+        p.x = -boxHalfExtents.x;
+        if (v.x < 0)
+            v.x = 0;
     }
-    else if (lx > boxHalfExtents.x)
+    else if (p.x > boxHalfExtents.x)
     {
-        lx = boxHalfExtents.x;
-        float p = dot(v, bucketRight);
-        if (p > 0)
-            v -= bucketRight * p * 1.2;
-    }
-    // محور Y (رأسي — أرضية أقوى)
-    if (ly < -boxHalfExtents.y)
-    {
-        ly = -boxHalfExtents.y;
-        float p = dot(v, bucketUp);
-        if (p < 0)
-            v -= bucketUp * p * 1.5;
-    }
-    else if (ly > boxHalfExtents.y)
-    {
-        ly = boxHalfExtents.y;
-        float p = dot(v, bucketUp);
-        if (p > 0)
-            v -= bucketUp * p;
-    }
-    // محور Z
-    if (lz < -boxHalfExtents.z)
-    {
-        lz = -boxHalfExtents.z;
-        float p = dot(v, bucketForward);
-        if (p < 0)
-            v -= bucketForward * p * 1.2;
-    }
-    else if (lz > boxHalfExtents.z)
-    {
-        lz = boxHalfExtents.z;
-        float p = dot(v, bucketForward);
-        if (p > 0)
-            v -= bucketForward * p * 1.2;
+        p.x = boxHalfExtents.x;
+        if (v.x > 0)
+            v.x = 0;
     }
 
-    positions[i] = bucketCenter + bucketRight * lx + bucketUp * ly + bucketForward * lz;
+    if (p.y < -boxHalfExtents.y)
+    {
+        p.y = -boxHalfExtents.y;
+        if (v.y < 0)
+            v.y = 0;
+    }
+    else if (p.y > boxHalfExtents.y)
+    {
+        p.y = boxHalfExtents.y;
+        if (v.y > 0)
+            v.y = 0;
+    }
+
+    if (p.z < -boxHalfExtents.z)
+    {
+        p.z = -boxHalfExtents.z;
+        if (v.z < 0)
+            v.z = 0;
+    }
+    else if (p.z > boxHalfExtents.z)
+    {
+        p.z = boxHalfExtents.z;
+        if (v.z > 0)
+            v.z = 0;
+    }
+
+    positions[i] = p;
     velocities[i] = v;
 }
 
