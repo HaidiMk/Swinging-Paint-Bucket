@@ -597,7 +597,7 @@ MonoBehaviour:
   holeHeightFromBottom: 0
   spillAngleThreshold: 5
   overflowAngleThreshold: 80
-  particlesPerSecond: 10
+  particlesPerSecond: 13.6
   overflowParticlesPerSecond: 33
   velocityBoostFactor: 1.75
   enableTorricelli: 1
@@ -627,10 +627,10 @@ MonoBehaviour:
   surfaceType: 0
   enableSurfaceEffects: 1
   surfaceEffectStrength: 0.65
-  maxParticles: 20000
+  maxParticles: 5000
   h: 0.06
   autoComputeH: 1
-  targetNeighborCount: 30
+  targetNeighborCount: 42
   restDensity: 6
   solverIterations: 3
   epsilon: 600
@@ -645,7 +645,7 @@ MonoBehaviour:
   speedToSizeMultiplier: 0.3
   splashDroplets: 6
   splashMaxRadius: 30
-  readbackInterval: 1
+  readbackInterval: 4
   dropletSizeRatio: 0.3
   sprayEnabled: 1
   exactDotSize: 4
@@ -657,17 +657,17 @@ MonoBehaviour:
   enableLayeredPaintColors: 1
   layerPaintColors:
   - {r: 0.95, g: 0.05, b: 0.04, a: 1}
-  - {r: 0.05, g: 0.2, b: 1, a: 1}
-  - {r: 0.216981, g: 1, b: 0.56666416, a: 1}
-  - {r: 0.9465782, g: 1, b: 0.3830188, a: 1}
+  - {r: 0, g: 0.29791164, b: 1, a: 1}
+  - {r: 1, g: 0, b: 0.8537893, a: 1}
+  - {r: 0.016346177, g: 0.7433963, b: 0, a: 1}
   particlesPerLayer: 500
   simpleLayerVisuals: 1
   enableLightCanvasMixing: 1
-  canvasMixStrength: 0.95
+  canvasMixStrength: 0.82
   paintDepositStrength: 0.77
-  canvasApplyEveryNFrames: 4
-  maxImpactsPerReadback: 30
-  verboseDebugLogs: 0
+  canvasApplyEveryNFrames: 8
+  maxImpactsPerReadback: 172
+  verboseDebugLogs: 1
   enableParticleSloshing: 1
   particleSloshStrength: 0.95
   particleSloshResponse: 9
@@ -866,6 +866,7 @@ MonoBehaviour:
   bounce: 0.3
   timeScale: 1
   fadeOutDuration: 3
+  fadeMaxFriction: 0.6
   fadeOutStarted: 0
   fadeOutTimer: 0
   enableCameraFollow: 0

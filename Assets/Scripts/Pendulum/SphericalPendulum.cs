@@ -109,12 +109,13 @@ public class SphericalPendulum : MonoBehaviour
     [Tooltip("مدة التخميد التدريجي بعد انتهاء التأرجح (ثانية).")]
     public float fadeOutDuration = 6.0f;
 
+    [Tooltip("أقصى احتكاك إضافي وقت التخميد. القيمة القديمة (3) كانت كبيرة كتير مقارنة بـ jointFriction (0.05)، فكانت الطاقة تخلص خلال 3-4 ثواني بس من أصل 6 — فيحس المستخدم إنو وقف فجأة بدل ما يشوف تباطؤ واضح. 0.6-1.0 بيمدد التباطؤ المرئي على كل مدة fadeOutDuration تقريبًا.")]
+    [Range(0.1f, 3f)] public float fadeMaxFriction = 0.6f;
+
     [HideInInspector] public bool fadeOutStarted = false;
     [HideInInspector] public float fadeOutTimer = 0f;
 
-    // [FIX-13] حد أقصى 6 بدل 8 لتجنب الرجة المرئية
     float fadeOutFriction = 0f;
-    const float FADE_MAX_FRICTION = 3f;
 
     [Header("Camera Follow — تتبع الكاميرا")]
     public bool enableCameraFollow = true;
@@ -281,7 +282,7 @@ public class SphericalPendulum : MonoBehaviour
 
         float Lf = Mathf.Max(sloshPendulumLength, 0.01f);
         float ks = fluidMass * gravity / Lf;
-        float cs = sloshDamping;
+        float cs = sloshDamping + fadeOutFriction * 2f; // نفس منطق fadeOutFriction، يخلي التمايل يهدأ أسرع وقت الفيدأوت
 
         Vector3 vNow = LinearVelocity(theta, phi, r, thetaVel, phiVel, rVel);
         Vector3 aWorld = (vNow - sloshPrevVelocity) / Mathf.Max(dt, 1e-4f);
@@ -362,6 +363,13 @@ public class SphericalPendulum : MonoBehaviour
 
         if (bucketBottomY >= floorY) return;
 
+        // وقت الفيدأوت، الارتداد لازم يخف مع الوقت هو كمان (مش بس thetaVel/phiVel)
+        // وإلا الدلو بيضل يرتد عن الأرض بنفس القوة بعد ما باقي الحركة خفّت،
+        // وهاد يبين كحركة مفاجئة/غريبة قبل التوقف مباشرة
+        float bounceNow = bounce;
+        if (fadeOutStarted)
+            bounceNow = bounce * (1f - Mathf.Clamp01(fadeOutTimer / fadeOutDuration));
+
         // ── تصحيح موقع r ─────────────────────────────────────────
         float newR = (Mathf.Abs(cosT) > 0.01f)
             ? (pivotPosition.y - floorY - bucketRadius) / cosT
@@ -376,13 +384,13 @@ public class SphericalPendulum : MonoBehaviour
         // ── انعكاس السرعة الشعاعية مع فقدان طاقة ────────────────
         // rVel هو مركبة السرعة على محور الحبل (اتجاه الاصطدام)
         if (rVel < 0f)
-            rVel = -rVel * bounce;
+            rVel = -rVel * bounceNow;
 
         // ── فقدان الطاقة في السرعة الزاوية ───────────────────────
         // عند الاصطدام تُفقد طاقة بنسبة (1 - bounce²) من الحركة الزاوية
         // bounce=1 (مرن تام) → لا فقدان | bounce=0 (غير مرن) → توقف كامل
         float energyRetain = Mathf.Sqrt(Mathf.Clamp01(
-            bounce * bounce + (1f - bounce * bounce) * Mathf.Abs(cosT)));
+            bounceNow * bounceNow + (1f - bounceNow * bounceNow) * Mathf.Abs(cosT)));
         thetaVel *= energyRetain;
         phiVel *= energyRetain;
 
@@ -392,7 +400,7 @@ public class SphericalPendulum : MonoBehaviour
                 + Mathf.Clamp01(impactSpeed * 0.15f));
 
         Debug.Log($"[Pendulum] Floor collision | speed={impactSpeed:F2} m/s" +
-                  $" | bounce={bounce:F2} | retain={energyRetain:F2}");
+                  $" | bounce={bounceNow:F2} | retain={energyRetain:F2}");
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -415,8 +423,8 @@ public class SphericalPendulum : MonoBehaviour
         float thVel = s.d, phVel = s.e, rrVel = s.f;
 
         float sinT = Mathf.Sin(th);
-        if (Mathf.Abs(sinT) < 0.01f)
-            sinT = (sinT >= 0f ? 1f : -1f) * 0.01f;
+        if (Mathf.Abs(sinT) < 0.05f)
+            sinT = (sinT >= 0f ? 1f : -1f) * 0.05f;
         float cosT = Mathf.Cos(th);
 
         rr = Mathf.Max(rr, 0.1f);
@@ -454,8 +462,15 @@ public class SphericalPendulum : MonoBehaviour
             float Ftheta = ks * sloshThetaDir + cs * sloshThetaDirVel;
             float Fphi = ks * sloshPhiDir + cs * sloshPhiDirVel;
             float mTotal = mass + fluidMass;
-            sloshTheta = Mathf.Clamp(-Ftheta / (mTotal * rr), -8f, 8f);
-            sloshPhi = Mathf.Clamp(-Fphi / (mTotal * rr * sinT), -8f, 8f);
+
+            // وقت الفيدأوت، هاي القوة لازم تخف لصفر هي كمان — وإلا
+            // بتضل ترجّع طاقة عالدلو بعد ما باقي الحركة خفّت، وهاد سبب "الفتلة"
+            float sloshFadeScale = 1f;
+            if (fadeOutStarted)
+                sloshFadeScale = 1f - Mathf.Clamp01(fadeOutTimer / fadeOutDuration);
+
+            sloshTheta = Mathf.Clamp(-Ftheta / (mTotal * rr), -8f, 8f) * sloshFadeScale;
+            sloshPhi = Mathf.Clamp(-Fphi / (mTotal * rr * sinT), -8f, 8f) * sloshFadeScale;
         }
 
         // [FIX-13] الاحتكاك الكلي = jointFriction + fadeOutFriction + humidFriction
@@ -484,11 +499,11 @@ public class SphericalPendulum : MonoBehaviour
               rr * (thVel * thVel + sinT * sinT * phVel * phVel)
             + gravity * cosT
             + springForce
-            - (radialDamping / mass) * rrVel
+            - ((radialDamping + fadeOutFriction) / mass) * rrVel
             + dragR;
 
-        thetaAcc = Mathf.Clamp(thetaAcc, -200f, 200f);
-        phiAcc = Mathf.Clamp(phiAcc, -200f, 200f);
+        thetaAcc = Mathf.Clamp(thetaAcc, -50f, 50f);
+        phiAcc = Mathf.Clamp(phiAcc, -50f, 50f);
         rAcc = Mathf.Clamp(rAcc, -200f, 200f);
 
         return new Vector6(thVel, phVel, rrVel, thetaAcc, phiAcc, rAcc);
@@ -586,7 +601,7 @@ public class SphericalPendulum : MonoBehaviour
             float t = Mathf.Clamp01(fadeOutTimer / fadeOutDuration);
 
             // [FIX-13] خطي بدل تربيعي — توزيع أكثر اتساقاً للتخميد
-            fadeOutFriction = Mathf.Lerp(0f, FADE_MAX_FRICTION, t);
+            fadeOutFriction = Mathf.Lerp(0f, fadeMaxFriction, t);
 
             float angularEnergy =
                   Mathf.Abs(thetaVel)
