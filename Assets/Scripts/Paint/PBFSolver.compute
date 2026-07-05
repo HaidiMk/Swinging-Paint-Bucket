@@ -592,4 +592,13 @@ void ApplyCohesion(uint3 id : SV_DispatchThreadID)
         velocities[i] += force * dt;
         velocities[i] *= max(0.0, 1.0 - particleCohesionDamping * dt);
     }
+
+    // Sleep threshold: cohesion + repulsion keep fighting near the walls
+    // (boundary clamping pushes particles closer than ideal spacing), so a
+    // tiny numerical jitter never fully dies out there — this was the cause
+    // of the endless "boiling" look along the container walls.
+    // If the remaining velocity is tiny, snap it to zero instead of letting
+    // it linger forever.
+    if (dot(velocities[i], velocities[i]) < 0.0004) // ~0.02 m/s
+        velocities[i] = float3(0, 0, 0);
 }

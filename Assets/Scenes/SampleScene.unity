@@ -256,6 +256,55 @@ MonoBehaviour:
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
   m_Version: 2
+--- !u!1 &405365518
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 405365520}
+  - component: {fileID: 405365519}
+  m_Layer: 0
+  m_Name: ControlPanel
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &405365519
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 405365518}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 17c0def0764b04f4e90cf7065f06f079, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ControlPanelUI
+  pendulum: {fileID: 1206993304}
+  solver: {fileID: 967485741}
+  bucketHole: {fileID: 0}
+  toggleKey: 9
+  visible: 1
+--- !u!4 &405365520
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 405365518}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -3.44012, y: 0, z: -3.2044}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &410087039
 GameObject:
   m_ObjectHideFlags: 0
@@ -627,7 +676,7 @@ MonoBehaviour:
   surfaceType: 0
   enableSurfaceEffects: 1
   surfaceEffectStrength: 0.65
-  maxParticles: 20000
+  maxParticles: 5000
   h: 0.06
   autoComputeH: 1
   targetNeighborCount: 42
@@ -656,8 +705,8 @@ MonoBehaviour:
   visualParticleSize: 0.015
   enableLayeredPaintColors: 1
   layerPaintColors:
-  - {r: 0.24126014, g: 0.44516355, b: 0.94716984, a: 1}
-  - {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  - {r: 1, g: 0, b: 0.04551792, a: 1}
+  - {r: 0, g: 0.45147896, b: 1, a: 1}
   particlesPerLayer: 1000
   simpleLayerVisuals: 1
   enableLightCanvasMixing: 1
@@ -1059,3 +1108,4 @@ SceneRoots:
   - {fileID: 2060389002}
   - {fileID: 967485739}
   - {fileID: 829268569}
+  - {fileID: 405365520}

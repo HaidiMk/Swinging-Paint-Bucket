@@ -258,6 +258,10 @@ public class PBFSolver : MonoBehaviour
     public string saveFolder = @"C:\Users\Haidi\VR_Project"; // مسار حفظ الصورة والتقرير
     int paintedSplats = 0;     // عدد المسارات (بقع نزلت ع اللوحة)
     float motionElapsed = 0f;  // زمن الحركة
+
+    // ── للوحة التحكم: قراءة إحصائيات التجربة الحية ────────────────
+    public int PaintedSplats => paintedSplats;
+    public float MotionElapsed => motionElapsed;
     float canvasHalfX = 0.5f;
     float canvasHalfZ = 0.5f;
 
@@ -318,6 +322,24 @@ public class PBFSolver : MonoBehaviour
         h = Mathf.Pow(sphereVolumeNeeded / (4f / 3f * Mathf.PI), 1f / 3f);
 
         Debug.Log($"[PBFSolver] h تلقائي = {h:F4} (جيران مستهدفة={targetNeighborCount}, كثافة={density:F0} جزيء/م3)");
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //  RestartSimulation — إعادة تشغيل كاملة (لازمة لما نغيّر عدد الجزيئات
+    //  أو أي إعداد بيأثر على حجم الـ Buffers). تُستدعى من لوحة التحكم.
+    // ════════════════════════════════════════════════════════════════
+    public void RestartSimulation()
+    {
+        ReleaseBuffers();
+        AutoComputeH();
+        ApplyPaintType();
+        InitGrid();
+        InitGPUBuffers();
+        ClearCanvas();
+        SpawnParticles();
+        CalibrateRestDensityScale();
+        initialized = true;
+        Debug.Log($"[PBFSolver] أعيد التشغيل — Particles={maxParticles}");
     }
 
     void Start()
@@ -614,7 +636,10 @@ public class PBFSolver : MonoBehaviour
         frameCount++;
 
         // حساب تسارع الدلو على CPU
-        Vector3 curVel = pendulum != null ? pendulum.GetBucketVelocity() : Vector3.zero;
+        // إذا البندول وقف تمامًا، منعتبر سرعته صفر — حتى لو صار أي خلل وبقيت
+        // قيمة قديمة عالقة بالبندول، ما ترجع تحرك السائل جوا الدلو من بعد التوقف.
+        bool pendulumStopped = pendulum != null && !pendulum.IsRunning;
+        Vector3 curVel = (pendulum != null && !pendulumStopped) ? pendulum.GetBucketVelocity() : Vector3.zero;
         bucketAccelWorld = (curVel - prevBucketVel) / Mathf.Max(dt, 0.001f);
         bucketAccelWorld = Vector3.ClampMagnitude(bucketAccelWorld, 8f);
         prevBucketVel = curVel;
@@ -644,22 +669,29 @@ public class PBFSolver : MonoBehaviour
         Dispatch(kFindNeighbors);
 
         // Pass 3: حل الـ Constraints (عدة iterations = دقة أعلى)
-        for (int iter = 0; iter < solverIterations; iter++)
+        // لما الدلو يوقف تمامًا، منوقف حل الـ constraints والتماسك كليًا —
+        // هدول هني سبب "الغليان" المستمر (تصادم دائم بين التماسك والضغط عند
+        // الجدران). بما إنو الدلو واقف، ما في داعي نحلها كل فريم أصلاً؛
+        // الجاذبية + حدود الدلو (EnforceBoundary) كافيين يخلوا السائل ثابت.
+        if (!pendulumStopped)
         {
-            Dispatch(kSolveConstraints);
-            Dispatch(kApplyCorrection);
-            Dispatch(kClampPredicted);   // يطبّق التصحيح على predictedPos ويقصّه كل iteration
+            for (int iter = 0; iter < solverIterations; iter++)
+            {
+                Dispatch(kSolveConstraints);
+                Dispatch(kApplyCorrection);
+                Dispatch(kClampPredicted);   // يطبّق التصحيح على predictedPos ويقصّه كل iteration
+            }
         }
 
         // Pass 4: تحديث السرعة والموقع
         Dispatch(kUpdateVelocity);
 
         // Pass 4ب: اللزوجة (تماسك داخل الدلو)
-        if (viscosity > 0f)
+        if (viscosity > 0f && !pendulumStopped)
             Dispatch(kApplyViscosity);
 
         // Pass 4ج: تماسك سطحي بين الجزيئات حتى لا يظهر السائل كحبيبات منفصلة
-        if (enableParticleCohesion && particleCohesionStrength > 0f)
+        if (enableParticleCohesion && particleCohesionStrength > 0f && !pendulumStopped)
             Dispatch(kApplyCohesion);
 
         // Pass 5: حدود الدلو
@@ -696,7 +728,8 @@ public class PBFSolver : MonoBehaviour
         // السائل لا يتبع الدلو فوراً: ندمج بين القوة الوهمية الناتجة عن التسارع
         // وبين lag بسيط عكس سرعة الدلو، فيظهر التموّج خصوصاً عند أقصى اليمين/اليسار.
         Vector3 lateralPseudo = Vector3.ProjectOnPlane(-bucketAccelWorld, up);
-        Vector3 bucketVel = pendulum != null ? pendulum.GetBucketVelocity() : Vector3.zero;
+        bool pendulumStoppedNow = pendulum != null && !pendulum.IsRunning;
+        Vector3 bucketVel = (pendulum != null && !pendulumStoppedNow) ? pendulum.GetBucketVelocity() : Vector3.zero;
         Vector3 lateralVel = Vector3.ProjectOnPlane(bucketVel, up);
 
         Vector3 sloshDrive = lateralPseudo;
@@ -1749,7 +1782,7 @@ public class PBFSolver : MonoBehaviour
     // ════════════════════════════════════════════════════════════════
     //  Paint Type Settings
     // ════════════════════════════════════════════════════════════════
-    void ApplyPaintType()
+    public void ApplyPaintType()
     {
         switch (paintType)
         {

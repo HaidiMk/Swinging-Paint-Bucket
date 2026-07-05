@@ -547,6 +547,14 @@ public class SphericalPendulum : MonoBehaviour
         simRunning = false;
         returningToRest = true;
         stopReason = reason;
+
+        // لازم نصفّر السرعة الزاوية هون، وإلا GetBucketVelocity() بترجع نفس
+        // الرقم القديم للأبد (الزاوية بتوقف تتحدث، بس السرعة بتضل "عالقة")
+        // وهاد كان سبب استمرار تمايل/غليان السائل جوا الدلو بعد التوقف الكامل.
+        thetaVel = 0f;
+        phiVel = 0f;
+        rVel = 0f;
+
         Debug.Log($"[Pendulum] Finished — Swings:{zeroCrossCount / 2} | {reason}");
         Debug.Log($"[Pendulum] Max Energy Drift: {maxEnergyDrift:F4}%");
         if (trail != null) trail.emitting = false;
