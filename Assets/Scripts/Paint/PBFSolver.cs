@@ -1260,7 +1260,20 @@ public class PBFSolver : MonoBehaviour
         Color pigmentMixed = PigmentMixApprox(old, incoming);
         Color target = Color.Lerp(pigmentMixed, incoming, 0.18f * paintDepositStrength);
 
-        float mixAmount = Mathf.Clamp01(strength * canvasMixStrength * overlapBoost + 0.06f);
+        float mixAmount = Mathf.Clamp01(strength * canvasMixStrength * overlapBoost + 0.10f);
+
+        // إذا البكسل صار لون ممزوج (أخضر/بنفسجي/برتقالي) بثقة عالية أصلاً، امسح
+        // أي بقايا لون قديم تحته نهائيًا بدل ما نمزج جزئي — هيك ما يرجع يطلع
+        // نقط من لون قديم جوا الشريط الممزوج، لأي مزيج من التلاتة مش الأخضر بس.
+        bool oldIsConfidentGreen = old.g > 0.35f && old.r < 0.28f && old.b < 0.28f;
+        bool oldIsConfidentPurple = old.r > 0.22f && old.r < 0.42f && old.b > 0.38f && old.g < 0.15f;
+        bool oldIsConfidentOrange = old.r > 0.75f && old.g > 0.20f && old.g < 0.60f && old.b < 0.10f;
+        if (oldIsConfidentGreen || oldIsConfidentPurple || oldIsConfidentOrange)
+        {
+            canvasPx[index] = pigmentMixed;
+            return;
+        }
+
         canvasPx[index] = Color.Lerp(old, target, mixAmount);
     }
 
@@ -1274,14 +1287,31 @@ public class PBFSolver : MonoBehaviour
         bool aYellow = a.r > 0.65f && a.g > 0.55f && a.b < 0.35f;
         bool bYellow = b.r > 0.65f && b.g > 0.55f && b.b < 0.35f;
 
+        // ألوان ممزوجة سابقًا — لازم نتعرف عليها كحالة قائمة بذاتها،
+        // وإلا كل ضربة جديدة من نفس اللون الأساسي (مثلاً أزرق) بتغسلها
+        // تدريجيًا لأنها ما بتطابق aRed/aBlue/aYellow وبتروح عالمسار العام.
+        bool aPurple = a.r > 0.25f && a.r < 0.70f && a.b > 0.32f && a.g < 0.42f;
+        bool bPurple = b.r > 0.25f && b.r < 0.70f && b.b > 0.32f && b.g < 0.42f;
+        bool aGreen = a.g > 0.35f && a.r < 0.50f && a.b < 0.55f;
+        bool bGreen = b.g > 0.35f && b.r < 0.50f && b.b < 0.55f;
+        bool aOrange = a.r > 0.70f && a.g > 0.20f && a.g < 0.62f && a.b < 0.35f;
+        bool bOrange = b.r > 0.70f && b.g > 0.20f && b.g < 0.62f && b.b < 0.35f;
+
+        if ((aGreen && (bBlue || bYellow)) || (bGreen && (aBlue || aYellow)))
+            return new Color(0.08f, 0.46f, 0.13f, 1f);
+        if ((aPurple && (bBlue || bRed)) || (bPurple && (aBlue || aRed)))
+            return new Color(0.30f, 0.03f, 0.46f, 1f); // يضل بنفسجي، ما يرجع يتغسل لأزرق/أحمر صافي
+        if ((aOrange && (bRed || bYellow)) || (bOrange && (aRed || aYellow)))
+            return new Color(0.92f, 0.48f, 0.02f, 1f);
+
         if ((aYellow && bBlue) || (aBlue && bYellow))
-            return new Color(0.12f, 0.62f, 0.18f, 1f); // أصفر + أزرق = أخضر
+            return new Color(0.08f, 0.46f, 0.13f, 1f); // أصفر + أزرق = أخضر
 
         if ((aRed && bBlue) || (aBlue && bRed))
-            return new Color(0.45f, 0.10f, 0.60f, 1f); // أحمر + أزرق = بنفسجي
+            return new Color(0.30f, 0.03f, 0.46f, 1f); // أحمر + أزرق = بنفسجي
 
         if ((aRed && bYellow) || (aYellow && bRed))
-            return new Color(0.95f, 0.38f, 0.06f, 1f); // أحمر + أصفر = برتقالي
+            return new Color(0.92f, 0.48f, 0.02f, 1f); // أحمر + أصفر = برتقالي
 
         Color avg = (a + b) * 0.5f;
         avg.a = 1f;
@@ -1292,7 +1322,8 @@ public class PBFSolver : MonoBehaviour
             Mathf.Clamp01(avg.b * 0.96f),
             1f
         );
-        return Color.Lerp(softened, b, 0.28f);
+        // كانت 0.28 (تسحب بقوة نحو b) — نزّلناها حتى ما تغسل لون ممزوج موجود بسرعة
+        return Color.Lerp(softened, b, 0.12f);
     }
 
     // ════════════════════════════════════════════════════════════════

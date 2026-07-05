@@ -597,7 +597,7 @@ MonoBehaviour:
   holeHeightFromBottom: 0
   spillAngleThreshold: 5
   overflowAngleThreshold: 80
-  particlesPerSecond: 13.6
+  particlesPerSecond: 10
   overflowParticlesPerSecond: 33
   velocityBoostFactor: 1.75
   enableTorricelli: 1
@@ -627,7 +627,7 @@ MonoBehaviour:
   surfaceType: 0
   enableSurfaceEffects: 1
   surfaceEffectStrength: 0.65
-  maxParticles: 5000
+  maxParticles: 20000
   h: 0.06
   autoComputeH: 1
   targetNeighborCount: 42
@@ -656,11 +656,9 @@ MonoBehaviour:
   visualParticleSize: 0.015
   enableLayeredPaintColors: 1
   layerPaintColors:
-  - {r: 0.95, g: 0.05, b: 0.04, a: 1}
-  - {r: 0, g: 0.29791164, b: 1, a: 1}
-  - {r: 1, g: 0, b: 0.8537893, a: 1}
-  - {r: 0.016346177, g: 0.7433963, b: 0, a: 1}
-  particlesPerLayer: 500
+  - {r: 0.24126014, g: 0.44516355, b: 0.94716984, a: 1}
+  - {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  particlesPerLayer: 1000
   simpleLayerVisuals: 1
   enableLightCanvasMixing: 1
   canvasMixStrength: 0.82
@@ -863,10 +861,10 @@ MonoBehaviour:
   windVelocity: {x: 0, y: 0, z: 0}
   n_swings: 25
   floorY: -1
-  bounce: 0.3
+  bounce: 0.15
   timeScale: 1
-  fadeOutDuration: 3
-  fadeMaxFriction: 0.6
+  fadeOutDuration: 18
+  fadeMaxFriction: 0.5
   fadeOutStarted: 0
   fadeOutTimer: 0
   enableCameraFollow: 0
