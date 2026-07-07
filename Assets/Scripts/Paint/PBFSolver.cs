@@ -51,9 +51,9 @@ public class PBFSolver : MonoBehaviour
 
     // ══════════════════════════════════════════════════════════════
     [Header("PBF Settings — إعدادات المحاكاة")]
-    [Tooltip("عدد الجزيئات — RTX 2050 يدعم 50K-200K بسهولة")]
-    [Range(1000, 200000)]
-    public int maxParticles = 2500;
+    [Tooltip("عدد الجزيئات — يمكن رفعه فوق 200K على كروت أقوى. غيّر الرقم ثم Restart Simulation.")]
+    [Min(1000)]
+    public int maxParticles = 40000;
 
     [Tooltip("نصف قطر التأثير بين الجزيئات")]
     [Range(0.05f, 0.3f)]
@@ -142,25 +142,41 @@ public class PBFSolver : MonoBehaviour
     [Range(1f, 18f)] public float particleSloshResponse = 11.5f;
 
     [Tooltip("تخميد التموّج. قيمة أعلى = اهتزاز أقل.")]
-    [Range(0.5f, 12f)] public float particleSloshDamping = 3.6f;
+    [Range(0.5f, 12f)] public float particleSloshDamping = 5.8f;
 
     [Tooltip("قوة الدفع الجانبي للجزيئات قرب سطح السائل.")]
-    [Range(0f, 12f)] public float particleSloshForce = 5.8f;
+    [Range(0f, 12f)] public float particleSloshForce = 3.2f;
 
     [Tooltip("قوة رفع/خفض الجزيئات قرب الأطراف حتى يظهر السائل مائلاً فعلياً لا ككتلة مسطحة.")]
-    [Range(0f, 12f)] public float particleSloshLiftForce = 6.5f;
+    [Range(0f, 12f)] public float particleSloshLiftForce = 1.6f;
 
     [Tooltip("تعزيز التموّج لحظة تغير الاتجاه عند أقصى اليمين/اليسار.")]
     [Range(0f, 1.5f)] public float particleSloshTurnBoost = 0.55f;
 
     [Tooltip("كم يسمح لمستوى الجزيئات أن يرتفع من جهة وينخفض من الجهة الأخرى.")]
-    [Range(0f, 0.45f)] public float particleSloshSurfaceSlope = 0.32f;
+    [Range(0f, 0.45f)] public float particleSloshSurfaceSlope = 0.22f;
 
     [Tooltip("يعزز تأثير التموّج على الجزيئات القريبة من سطح السائل أكثر من الجزيئات السفلية.")]
     [Range(0f, 1f)] public float particleSloshSurfaceBias = 0.88f;
 
     [Tooltip("إظهار سهم فقط لاتجاه اندفاع الجزيئات. لا يضيف سطح سائل مرئي.")]
     public bool showParticleSloshGizmo = true;
+
+    [Header("Fluid Settling — منع الغليان بعد توقف الدلو")]
+    [Tooltip("تخميد عام خفيف دائماً. يمنع تراكم طاقة رقمية داخل الـ PBF.")]
+    [Range(0f, 8f)] public float insideVelocityDamping = 1.35f;
+
+    [Tooltip("تخميد إضافي عندما تكون حركة الدلو شبه متوقفة. ارفعه إذا ظل السائل يغلي.")]
+    [Range(0f, 24f)] public float stillSettleDamping = 12.0f;
+
+    [Tooltip("سرعة تعتبر تحتها الجزيئة ساكنة ويتم تصفيرها حتى لا تبقى ترجف.")]
+    [Range(0.001f, 0.08f)] public float velocitySleepThreshold = 0.028f;
+
+    [Tooltip("أصغر حركة للدلو قبل اعتبار الدلو متحركاً. ارفعه إذا تريد هدوء أسرع.")]
+    [Range(0.01f, 0.6f)] public float bucketStillSpeed = 0.08f;
+
+    [Tooltip("أصغر تسارع للدلو قبل اعتبار الدلو متحركاً. ارفعه إذا تريد هدوء أسرع.")]
+    [Range(0.1f, 5f)] public float bucketStillAccel = 0.65f;
 
     [Header("Debug")]
     public bool showDebugGizmos = true;
@@ -171,14 +187,14 @@ public class PBFSolver : MonoBehaviour
     [HideInInspector] public float gravityScale = 0.6f;
     [HideInInspector] public float bucketInfluence = 0.3f;
     [HideInInspector] public float SIGMA = 0.3f;
-    [HideInInspector] public float viscosity = 0.3f; // تُضبط حسب نوع الدهان
+    [HideInInspector] public float viscosity = 0.42f; // تُضبط حسب نوع الدهان
 
     [Header("Particle Cohesion — تماسك الجزيئات")]
     [Tooltip("يجعل الجزيئات القريبة تنجذب لبعضها بشكل خفيف حتى يظهر الطلاء ككتلة سائلة لا كحبيبات منفصلة.")]
     public bool enableParticleCohesion = true;
 
     [Tooltip("قوة التماسك بين الجزيئات. ارفعها إذا كان السائل مفككاً، وخففها إذا صار مثل الجل.")]
-    [Range(0f, 8f)] public float particleCohesionStrength = 2.2f;
+    [Range(0f, 8f)] public float particleCohesionStrength = 1.55f;
 
     [Tooltip("مسافة تأثير التماسك بالنسبة إلى h. قيمة أكبر = تماسك أوسع لكن أبطأ قليلاً.")]
     [Range(0.35f, 1.3f)] public float particleCohesionRadius = 0.85f;
@@ -187,7 +203,7 @@ public class PBFSolver : MonoBehaviour
     [Range(0f, 2f)] public float particleCohesionRepulsion = 0.45f;
 
     [Tooltip("تخميد إضافي بسيط يمنع اهتزاز كتلة السائل بعد إضافة التماسك.")]
-    [Range(0f, 4f)] public float particleCohesionDamping = 0.55f;
+    [Range(0f, 4f)] public float particleCohesionDamping = 1.35f;
 
     // ══════════════════════════════════════════════════════════════
     //  GPU Buffers — كل البيانات على كرت الشاشة
@@ -218,6 +234,7 @@ public class PBFSolver : MonoBehaviour
     int kFallingStep;
     int kApplyCohesion;
     int kClampPredicted;
+    int kDampInsideFluid;
 
     // ══════════════════════════════════════════════════════════════
     //  Grid
@@ -271,7 +288,10 @@ public class PBFSolver : MonoBehaviour
 
     // Dynamics
     Vector3 prevBucketVel = Vector3.zero;
+    Vector3 prevBucketCenter = Vector3.zero;
+    bool bucketMotionInitialized = false;
     Vector3 bucketAccelWorld = Vector3.zero;
+    float bucketMotionAmount = 0f;
 
     // Particle sloshing state: اتجاه وكمية ميلان الجزيئات داخل الدلو
     Vector3 particleSloshVector = Vector3.zero;
@@ -304,6 +324,32 @@ public class PBFSolver : MonoBehaviour
     public ComputeBuffer StatesBuffer => statesBuffer;
     public int ParticleCount => maxParticles;
     public Vector3 BucketUpDir => BucketUp;
+    public Vector3 BucketRightDir => BucketRight;
+    public Vector3 BucketForwardDir => BucketForward;
+
+    // داخل الدلو نخزن الجزيئات بإحداثيات محلية خاصة بالسائل:
+    // x = يمين الدلو، y = محور الدلو/ارتفاع السائل، z = أمام الدلو.
+    // أما FALLING فهي world-space حتى تصطدم باللوحة بشكل طبيعي.
+    public Vector3 BucketFluidLocalToWorld(Vector3 local)
+    {
+        return BucketCenter + BucketRight * local.x + BucketUp * local.y + BucketForward * local.z;
+    }
+
+    public Vector3 BucketFluidWorldToLocal(Vector3 world)
+    {
+        Vector3 d = world - BucketCenter;
+        return new Vector3(Vector3.Dot(d, BucketRight), Vector3.Dot(d, BucketUp), Vector3.Dot(d, BucketForward));
+    }
+
+    public Vector3 BucketFluidLocalDirToWorld(Vector3 localDir)
+    {
+        return BucketRight * localDir.x + BucketUp * localDir.y + BucketForward * localDir.z;
+    }
+
+    public Vector3 BucketFluidWorldDirToLocal(Vector3 worldDir)
+    {
+        return new Vector3(Vector3.Dot(worldDir, BucketRight), Vector3.Dot(worldDir, BucketUp), Vector3.Dot(worldDir, BucketForward));
+    }
 
     // ════════════════════════════════════════════════════════════════
     // بيحسب h تلقائيًا حتى عدد الجيران المتوقع لكل جزيء يضل قريب من targetNeighborCount
@@ -338,6 +384,7 @@ public class PBFSolver : MonoBehaviour
         ClearCanvas();
         SpawnParticles();
         CalibrateRestDensityScale();
+        ResetBucketMotionTracking();
         initialized = true;
         Debug.Log($"[PBFSolver] أعيد التشغيل — Particles={maxParticles}");
     }
@@ -358,9 +405,22 @@ public class PBFSolver : MonoBehaviour
         // InitVisualPS();   // ← off: replaced by GPU instanced renderer (PaintParticleRenderer)
         SpawnParticles();
         CalibrateRestDensityScale();   // يصحّح restDensity حسب h والكثافة الفعلية (يحافظ على نسب أنواع الطلاء)
+        ResetBucketMotionTracking();
 
         initialized = true;
         Debug.Log($"[PBFSolver] Initialized — Particles={maxParticles} | GPU=RTX2050 | Iterations={solverIterations}");
+    }
+
+
+    void ResetBucketMotionTracking()
+    {
+        prevBucketCenter = bucketTransform ? BucketCenter : Vector3.zero;
+        prevBucketVel = Vector3.zero;
+        bucketAccelWorld = Vector3.zero;
+        bucketMotionAmount = 0f;
+        bucketMotionInitialized = bucketTransform != null;
+        particleSloshVector = Vector3.zero;
+        particleSloshVelocity = Vector3.zero;
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -441,6 +501,7 @@ public class PBFSolver : MonoBehaviour
         kFallingStep = pbfComputeShader.FindKernel("FallingStep");
         kApplyCohesion = pbfComputeShader.FindKernel("ApplyCohesion");
         kClampPredicted = pbfComputeShader.FindKernel("ClampPredicted");
+        kDampInsideFluid = pbfComputeShader.FindKernel("DampInsideFluid");
 
         // اربط الـ Buffers بكل الـ kernels
         BindAllBuffers();
@@ -465,7 +526,7 @@ public class PBFSolver : MonoBehaviour
             kFindNeighbors, kSolveConstraints, kApplyCorrection,
             kUpdateVelocity, kEnforceBoundary, kFallingStep,
             kApplyViscosity,
-            kApplyCohesion, kClampPredicted
+            kApplyCohesion, kClampPredicted, kDampInsideFluid
         };
 
         foreach (int k in kernels)
@@ -544,9 +605,6 @@ public class PBFSolver : MonoBehaviour
         int[] initSt = new int[maxParticles];
         int[] initLayer = new int[maxParticles];
 
-        Vector3 center = BucketCenter;
-        Vector3 up = BucketUp, right = BucketRight, fwd = BucketForward;
-
         // توزيع FluidBox-style: شبكة طبقات منتظمة داخل أسطوانة الدلو بدل Random.
         // السبب: فوق 15K أي تكتل عشوائي بسيط يعمل ضغط زائد وخلايا grid مزدحمة، فيظهر الانفجار.
         float radius = bucketWorldRadius * 0.86f;
@@ -588,7 +646,8 @@ public class PBFSolver : MonoBehaviour
                         float ly = y + jy;
                         float lz = z + jz;
 
-                        initPos[count] = center + right * lx + fwd * lz + up * ly;
+                        // INSIDE particles are bucket-fluid-local, not world-space.
+                        initPos[count] = new Vector3(lx, ly, lz);
                         initVel[count] = Vector3.zero;
                         initSt[count] = INSIDE;
                         initLayer[count] = InitialLayerForParticle(count, ly);
@@ -605,7 +664,8 @@ public class PBFSolver : MonoBehaviour
             float a = Random.Range(0f, Mathf.PI * 2f);
             float r = radius * Mathf.Sqrt(Random.Range(0f, 1f));
             float y = Random.Range(bottom, top);
-            initPos[count] = center + right * (Mathf.Cos(a) * r) + fwd * (Mathf.Sin(a) * r) + up * y;
+            // INSIDE particles are bucket-fluid-local, not world-space.
+            initPos[count] = new Vector3(Mathf.Cos(a) * r, y, Mathf.Sin(a) * r);
             initVel[count] = Vector3.zero;
             initSt[count] = INSIDE;
             initLayer[count] = InitialLayerForParticle(count, y);
@@ -635,20 +695,37 @@ public class PBFSolver : MonoBehaviour
         float dt = Time.fixedDeltaTime;
         frameCount++;
 
-        // حساب تسارع الدلو على CPU
-        // إذا البندول وقف تمامًا، منعتبر سرعته صفر — حتى لو صار أي خلل وبقيت
-        // قيمة قديمة عالقة بالبندول، ما ترجع تحرك السائل جوا الدلو من بعد التوقف.
-        bool pendulumStopped = pendulum != null && !pendulum.IsRunning;
-        Vector3 curVel = (pendulum != null && !pendulumStopped) ? pendulum.GetBucketVelocity() : Vector3.zero;
-        bucketAccelWorld = (curVel - prevBucketVel) / Mathf.Max(dt, 0.001f);
-        bucketAccelWorld = Vector3.ClampMagnitude(bucketAccelWorld, 8f);
+        // نقيس حركة الدلو من الـ Transform نفسه، مو فقط من سكربت البندول.
+        // هيك السائل يتأثر بأي Animation/Physics/Manual movement للدلو.
+        Vector3 curCenter = BucketCenter;
+        if (!bucketMotionInitialized)
+        {
+            prevBucketCenter = curCenter;
+            prevBucketVel = Vector3.zero;
+            bucketAccelWorld = Vector3.zero;
+            bucketMotionInitialized = true;
+        }
+
+        Vector3 measuredVel = (curCenter - prevBucketCenter) / Mathf.Max(dt, 0.001f);
+        Vector3 pendulumVel = (pendulum != null && pendulum.IsRunning) ? pendulum.GetBucketVelocity() : measuredVel;
+        Vector3 curVel = Vector3.Lerp(measuredVel, pendulumVel, 0.35f);
+
+        Vector3 rawAccel = (curVel - prevBucketVel) / Mathf.Max(dt, 0.001f);
+        rawAccel = Vector3.ClampMagnitude(rawAccel, 10f);
+        bucketAccelWorld = Vector3.Lerp(bucketAccelWorld, rawAccel, 1f - Mathf.Exp(-14f * dt));
+
+        prevBucketCenter = curCenter;
         prevBucketVel = curVel;
 
         if (pendulum != null && pendulum.fadeOutStarted)
         {
-            float fp = Mathf.Clamp01(pendulum.fadeOutTimer / pendulum.fadeOutDuration);
+            float fp = Mathf.Clamp01(pendulum.fadeOutTimer / Mathf.Max(0.001f, pendulum.fadeOutDuration));
             bucketAccelWorld *= (1f - fp);
         }
+
+        float speed01 = Mathf.InverseLerp(bucketStillSpeed, bucketStillSpeed * 5f, curVel.magnitude);
+        float accel01 = Mathf.InverseLerp(bucketStillAccel, bucketStillAccel * 5f, bucketAccelWorld.magnitude);
+        bucketMotionAmount = Mathf.Clamp01(Mathf.Max(speed01, accel01));
 
         UpdateParticleSloshing(dt);
 
@@ -669,33 +746,30 @@ public class PBFSolver : MonoBehaviour
         Dispatch(kFindNeighbors);
 
         // Pass 3: حل الـ Constraints (عدة iterations = دقة أعلى)
-        // لما الدلو يوقف تمامًا، منوقف حل الـ constraints والتماسك كليًا —
-        // هدول هني سبب "الغليان" المستمر (تصادم دائم بين التماسك والضغط عند
-        // الجدران). بما إنو الدلو واقف، ما في داعي نحلها كل فريم أصلاً؛
-        // الجاذبية + حدود الدلو (EnforceBoundary) كافيين يخلوا السائل ثابت.
-        if (!pendulumStopped)
+        // لا نجمد السائل فجأة عند توقف البندول؛ نتركه يستقر عبر PBF واللزوجة.
+        for (int iter = 0; iter < solverIterations; iter++)
         {
-            for (int iter = 0; iter < solverIterations; iter++)
-            {
-                Dispatch(kSolveConstraints);
-                Dispatch(kApplyCorrection);
-                Dispatch(kClampPredicted);   // يطبّق التصحيح على predictedPos ويقصّه كل iteration
-            }
+            Dispatch(kSolveConstraints);
+            Dispatch(kApplyCorrection);
+            Dispatch(kClampPredicted);   // يطبّق التصحيح على predictedPos ويقصّه كل iteration
         }
 
         // Pass 4: تحديث السرعة والموقع
         Dispatch(kUpdateVelocity);
 
         // Pass 4ب: اللزوجة (تماسك داخل الدلو)
-        if (viscosity > 0f && !pendulumStopped)
+        if (viscosity > 0f)
             Dispatch(kApplyViscosity);
 
         // Pass 4ج: تماسك سطحي بين الجزيئات حتى لا يظهر السائل كحبيبات منفصلة
-        if (enableParticleCohesion && particleCohesionStrength > 0f && !pendulumStopped)
+        if (enableParticleCohesion && particleCohesionStrength > 0f)
             Dispatch(kApplyCohesion);
 
         // Pass 5: حدود الدلو
         Dispatch(kEnforceBoundary);
+
+        // Pass 5ب: تخميد/سكون الجزيئات داخل الدلو حتى لا تبقى تغلي عندما يتوقف الدلو
+        Dispatch(kDampInsideFluid);
 
         // Pass 6: الجزيئات الساقطة
         Dispatch(kFallingStep);
@@ -718,42 +792,50 @@ public class PBFSolver : MonoBehaviour
     {
         if (!enableParticleSloshing || bucketTransform == null)
         {
-            particleSloshVector = Vector3.Lerp(particleSloshVector, Vector3.zero, Mathf.Clamp01(dt * 8f));
-            particleSloshVelocity = Vector3.Lerp(particleSloshVelocity, Vector3.zero, Mathf.Clamp01(dt * 8f));
+            float off = 1f - Mathf.Exp(-10f * dt);
+            particleSloshVector = Vector3.Lerp(particleSloshVector, Vector3.zero, off);
+            particleSloshVelocity = Vector3.Lerp(particleSloshVelocity, Vector3.zero, off);
             return;
         }
 
         Vector3 up = BucketUp;
-
-        // السائل لا يتبع الدلو فوراً: ندمج بين القوة الوهمية الناتجة عن التسارع
-        // وبين lag بسيط عكس سرعة الدلو، فيظهر التموّج خصوصاً عند أقصى اليمين/اليسار.
         Vector3 lateralPseudo = Vector3.ProjectOnPlane(-bucketAccelWorld, up);
-        bool pendulumStoppedNow = pendulum != null && !pendulum.IsRunning;
-        Vector3 bucketVel = (pendulum != null && !pendulumStoppedNow) ? pendulum.GetBucketVelocity() : Vector3.zero;
-        Vector3 lateralVel = Vector3.ProjectOnPlane(bucketVel, up);
+        Vector3 lateralVel = Vector3.ProjectOnPlane(prevBucketVel, up);
 
-        Vector3 sloshDrive = lateralPseudo;
-        if (lateralVel.sqrMagnitude > 0.0001f)
-            sloshDrive += -lateralVel * 0.35f; // تأخر السائل عن حركة الدلو
-
-        float accelMag = lateralPseudo.magnitude;
-        float velMag = lateralVel.magnitude;
-        float turnBoost = Mathf.InverseLerp(0.85f, 0.05f, velMag) * Mathf.InverseLerp(1.0f, 8.0f, accelMag) * particleSloshTurnBoost;
-        float mag = sloshDrive.magnitude;
+        // Drive مؤقت من حركة الدلو: تسارع + lag من السرعة.
+        // عند توقف الدلو يصير desired = صفر، وما عاد نحقن طاقة بالجزيئات.
+        Vector3 sloshDrive = lateralPseudo - lateralVel * 0.22f;
+        float driveMag = sloshDrive.magnitude;
 
         Vector3 desired = Vector3.zero;
-        if (mag > 0.03f)
+        if (driveMag > 0.035f)
         {
-            float amount = Mathf.InverseLerp(0.18f, 7.0f, mag) * particleSloshStrength;
-            amount = Mathf.Clamp01(amount + turnBoost);
-            desired = sloshDrive.normalized * amount;
+            float amount = Mathf.InverseLerp(0.20f, 6.0f, driveMag) * particleSloshStrength;
+            desired = sloshDrive.normalized * Mathf.Clamp01(amount);
         }
 
-        // نموذج نابضي: يعطي قصور ذاتي وovershoot بدل حركة جامدة.
+        // نابض مخمد. عندما تكون الحركة ضعيفة نرفع التخميد كثيراً حتى لا يبقى overshoot.
+        float still01 = 1f - bucketMotionAmount;
+        float response = Mathf.Lerp(particleSloshResponse, particleSloshResponse * 0.55f, still01);
+        float damping = particleSloshDamping + stillSettleDamping * still01;
+
         Vector3 error = desired - particleSloshVector;
-        particleSloshVelocity += error * particleSloshResponse * dt;
-        particleSloshVelocity *= Mathf.Exp(-particleSloshDamping * dt);
+        particleSloshVelocity += error * response * dt;
+        particleSloshVelocity *= Mathf.Exp(-damping * dt);
         particleSloshVector += particleSloshVelocity * dt;
+
+        // تصفير حازم عند السكون حتى لا تبقى قيمة صغيرة تحرك السطح للأبد.
+        if (bucketMotionAmount < 0.08f && desired.sqrMagnitude < 0.0004f)
+        {
+            float settle = Mathf.Exp(-stillSettleDamping * dt);
+            particleSloshVector *= settle;
+            particleSloshVelocity *= settle;
+
+            if (particleSloshVector.sqrMagnitude < 0.00025f)
+                particleSloshVector = Vector3.zero;
+            if (particleSloshVelocity.sqrMagnitude < 0.00025f)
+                particleSloshVelocity = Vector3.zero;
+        }
 
         if (particleSloshVector.magnitude > 1f)
             particleSloshVector = particleSloshVector.normalized;
@@ -764,9 +846,12 @@ public class PBFSolver : MonoBehaviour
     // ════════════════════════════════════════════════════════════════
     void SetShaderConstants(float dt)
     {
-        Vector3 center = BucketCenter;
-        Vector3 up = BucketUp;
-        Vector3 gridOrig = center + gridOrigin;
+        // الـ Compute Shader يحسب INSIDE في bucket-fluid-local space.
+        // FALLING يبقى world-space ويستخدم gravity العادية.
+        Vector3 gravityLocal = BucketFluidWorldDirToLocal(Vector3.down * G * gravityScale);
+        Vector3 accelLocal = BucketFluidWorldDirToLocal(bucketAccelWorld);
+        Vector3 sloshLocal = BucketFluidWorldDirToLocal(particleSloshVector);
+        sloshLocal.y = 0f; // التموّج جانبي فقط، والرفع العمودي يحسبه الشيدر حسب side/height.
 
         pbfComputeShader.SetFloat("dt", dt);
         pbfComputeShader.SetFloat("h", h);
@@ -781,9 +866,15 @@ public class PBFSolver : MonoBehaviour
         pbfComputeShader.SetFloat("particleCohesionRadius", particleCohesionRadius);
         pbfComputeShader.SetFloat("particleCohesionRepulsion", particleCohesionRepulsion);
         pbfComputeShader.SetFloat("particleCohesionDamping", particleCohesionDamping);
-        pbfComputeShader.SetVector("bucketAccel", bucketAccelWorld);
+        pbfComputeShader.SetFloat("insideVelocityDamping", insideVelocityDamping);
+        pbfComputeShader.SetFloat("stillSettleDamping", stillSettleDamping);
+        pbfComputeShader.SetFloat("velocitySleepThreshold", velocitySleepThreshold);
+        pbfComputeShader.SetFloat("bucketMotionAmount", bucketMotionAmount);
+        pbfComputeShader.SetVector("gravityLocal", gravityLocal);
+        pbfComputeShader.SetVector("bucketAccelLocal", accelLocal);
+        pbfComputeShader.SetVector("bucketAccel", bucketAccelWorld); // compatibility/debug only
         pbfComputeShader.SetInt("enableParticleSloshing", enableParticleSloshing ? 1 : 0);
-        pbfComputeShader.SetVector("particleSloshVector", particleSloshVector);
+        pbfComputeShader.SetVector("particleSloshVector", sloshLocal);
         pbfComputeShader.SetFloat("particleSloshForce", particleSloshForce);
         pbfComputeShader.SetFloat("particleSloshLiftForce", particleSloshLiftForce);
         pbfComputeShader.SetFloat("particleSloshSurfaceSlope", particleSloshSurfaceSlope);
@@ -792,18 +883,18 @@ public class PBFSolver : MonoBehaviour
         pbfComputeShader.SetInt("maxNeighbors", MAX_NEIGHBORS);
         pbfComputeShader.SetInt("maxPerCell", MAX_PER_CELL);
 
-        // Bucket
-        pbfComputeShader.SetVector("bucketCenter", center);
-        pbfComputeShader.SetVector("bucketUp", up);
+        // Bucket in local fluid coordinates: y is vertical inside the bucket, xz is cylinder radius.
+        pbfComputeShader.SetVector("bucketCenter", Vector3.zero);
+        pbfComputeShader.SetVector("bucketUp", Vector3.up);
         pbfComputeShader.SetFloat("bucketRadius", bucketWorldRadius * 0.88f);
         pbfComputeShader.SetFloat("bucketTop", bucketWorldHeight * 0.5f * 0.55f);
         pbfComputeShader.SetFloat("bucketBottom", -bucketWorldHeight * 0.5f + h * 0.4f);
 
-        // Grid
+        // Grid is also local to the bucket. This keeps neighbour search stable while the bucket rotates.
         pbfComputeShader.SetInt("gridSizeX", gridSizeX);
         pbfComputeShader.SetInt("gridSizeY", gridSizeY);
         pbfComputeShader.SetInt("gridSizeZ", gridSizeZ);
-        pbfComputeShader.SetVector("gridOrigin", gridOrig);
+        pbfComputeShader.SetVector("gridOrigin", gridOrigin);
         pbfComputeShader.SetFloat("cellSize", cellSize);
     }
 
@@ -899,6 +990,7 @@ public class PBFSolver : MonoBehaviour
         if (statesCPU == null || positionsCPU == null || velocitiesCPU == null) return;
 
         Vector3 exit = isFromTop ? TopPosition : HolePosition;
+        Vector3 exitLocal = new Vector3(0f, isFromTop ? bucketWorldHeight * 0.5f * 0.55f : -bucketWorldHeight * 0.5f + h * 0.4f, 0f);
         int bestIdx = -1;
         float bestDist = float.MaxValue;
 
@@ -908,7 +1000,7 @@ public class PBFSolver : MonoBehaviour
             int i = Random.Range(0, maxParticles);
             if (statesCPU[i] != INSIDE) continue;
 
-            float d = (positionsCPU[i] - exit).sqrMagnitude;
+            float d = (positionsCPU[i] - exitLocal).sqrMagnitude;
             if (d < bestDist)
             {
                 bestDist = d;
@@ -935,12 +1027,18 @@ public class PBFSolver : MonoBehaviour
         int layer = CurrentLayerIndex();
         colorLayerCPU[bestIdx] = layer;
         statesCPU[bestIdx] = FALLING;
-        positionsCPU[bestIdx] = exit + Random.insideUnitSphere * (bucketWorldRadius * 0.10f);
+
+        // خروج متماسك مثل النسخة القديمة:
+        // لا نضيف سرعة السائل الداخلية لكل جزيئة لأنها تختلف من جزيئة لأخرى
+        // وتسبب تفرّق الدهان بعد خروجه كأنه رذاذ.
+        // نضع كل الجزيئات قرب فتحة الخروج وبنفس اتجاه السرعة تقريباً.
+        float exitSpread = bucketWorldRadius * 0.045f;
+        positionsCPU[bestIdx] = exit + Random.insideUnitSphere * exitSpread;
 
         Vector3 bucketVel = pendulum != null ? pendulum.GetBucketVelocity() : Vector3.zero;
         Vector3 exitDir = isFromTop ? BucketUp : -BucketUp;
         float exitSpeed = Mathf.Lerp(1.3f, 0.25f, SIGMA / 1.2f);
-        velocitiesCPU[bestIdx] = bucketVel + exitDir * exitSpeed + Random.insideUnitSphere * 0.04f;
+        velocitiesCPU[bestIdx] = bucketVel + exitDir * exitSpeed + Random.insideUnitSphere * 0.012f;
 
         // رفع عنصر واحد فقط للـ GPU بدل المصفوفات كلها — أخف بكثير
         oneIntUpload[0] = statesCPU[bestIdx];
@@ -1520,10 +1618,11 @@ public class PBFSolver : MonoBehaviour
 
     public void RefillBucket()
     {
-        statesBuffer.GetData(statesCPU);
-        for (int i = 0; i < maxParticles; i++)
-            if (statesCPU[i] == FALLING) statesCPU[i] = INSIDE;
-        statesBuffer.SetData(statesCPU);
+        // لأن INSIDE صار local-space و FALLING world-space، أسلم refill هو إعادة ملء الدلو
+        // بشبكة محلية مستقرة بدل تحويل نقاط ساقطة عشوائياً إلى الداخل.
+        SpawnParticles();
+        CalibrateRestDensityScale();
+        cpuDataReady = false;
     }
 
     public void ClearCanvas()
@@ -1789,7 +1888,7 @@ public class PBFSolver : MonoBehaviour
             case PaintType.Watercolor:
                 restDensity = 3f; SIGMA = 0.04f; gravityScale = 0.9f; bucketInfluence = 0.6f; viscosity = 0.18f; break;
             case PaintType.Acrylic:
-                restDensity = 4.5f; SIGMA = 0.3f; gravityScale = 0.6f; bucketInfluence = 0.3f; viscosity = 0.44f; break;
+                restDensity = 4.5f; SIGMA = 0.3f; gravityScale = 0.75f; bucketInfluence = 0.45f; viscosity = 0.30f; break;
             case PaintType.OilPaint:
                 restDensity = 6.5f; SIGMA = 0.85f; gravityScale = 0.4f; bucketInfluence = 0.12f; viscosity = 0.70f; break;
             case PaintType.Tempera:

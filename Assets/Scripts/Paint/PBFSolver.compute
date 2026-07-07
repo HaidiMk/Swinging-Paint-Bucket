@@ -30,7 +30,9 @@ float epsilon; // CFM (Constraint Force Mixing)
 float gravity;
 float gravityScale;
 float bucketInfluence;
-float3 bucketAccel;
+float3 bucketAccel; // world/debug compatibility only
+float3 gravityLocal; // inside particles use bucket-fluid-local space
+float3 bucketAccelLocal; // local pseudo acceleration of bucket
 
 // Particle sloshing inside bucket
 int enableParticleSloshing;
@@ -50,6 +52,12 @@ float particleCohesionStrength;
 float particleCohesionRadius;
 float particleCohesionRepulsion;
 float particleCohesionDamping;
+
+// Settling / anti-boiling
+float insideVelocityDamping;
+float stillSettleDamping;
+float velocitySleepThreshold;
+float bucketMotionAmount;
 
 // Bucket boundaries
 float3 bucketCenter;
@@ -123,42 +131,50 @@ void PredictPositions(uint3 id : SV_DispatchThreadID)
     if (states[i] != 0)
         return; // 0 = INSIDE
 
-    float3 grav = float3(0, -gravity * gravityScale, 0);
-    float3 bucketF = -bucketAccel * bucketInfluence;
+    // INSIDE particles are stored in bucket-fluid-local coordinates:
+    // x/z = cylinder radius, y = bucket vertical axis.
+    float3 bucketF = -bucketAccelLocal * bucketInfluence;
 
     float bfMag = length(bucketF);
     if (bfMag > 5.0)
         bucketF = bucketF / bfMag * 5.0;
 
-    float3 externalForce = grav + bucketF;
+    float3 externalForce = gravityLocal + bucketF;
+    float3 v = velocities[i];
 
     if (enableParticleSloshing != 0)
     {
-        float sloshMag = length(particleSloshVector);
+        float3 sloshVec = float3(particleSloshVector.x, 0.0, particleSloshVector.z);
+        float sloshMag = length(sloshVec);
         if (sloshMag > 0.0001)
         {
-            float3 offset = positions[i] - bucketCenter;
-            float vert = dot(offset, bucketUp);
-            float3 horizVec = offset - bucketUp * vert;
+            float3 pLocal = positions[i];
+            float vert = pLocal.y;
+            float3 horizVec = float3(pLocal.x, 0.0, pLocal.z);
             float denom = max(bucketTop - bucketBottom, 0.001);
             float height01 = saturate((vert - bucketBottom) / denom);
 
-            float surfaceWeight = lerp(1.0 - particleSloshSurfaceBias, 1.0, smoothstep(0.12, 1.0, height01));
-            float3 sloshDir = particleSloshVector / sloshMag;
+            // فقط الجزيئات القريبة من السطح تأخذ drive واضح.
+            // الأهم: نربطه بـ bucketMotionAmount حتى عند التوقف لا يبقى حقن طاقة.
+            float surfaceWeight = lerp(1.0 - particleSloshSurfaceBias, 1.0, smoothstep(0.18, 1.0, height01));
+            surfaceWeight *= bucketMotionAmount;
+
+            float3 sloshDir = sloshVec / sloshMag;
             float side = 0.0;
             if (bucketRadius > 0.0001)
                 side = clamp(dot(horizVec, sloshDir) / bucketRadius, -1.0, 1.0);
 
-            externalForce += particleSloshVector * particleSloshForce * surfaceWeight;
-            externalForce += bucketUp * (side * sloshMag * particleSloshLiftForce * surfaceWeight);
+            externalForce += sloshVec * particleSloshForce * surfaceWeight;
 
-            velocities[i] += sloshDir * (0.45 * sloshMag * surfaceWeight * dt);
+            // رفع خفيف جداً فقط وقت الحركة. الرفع القوي كان سبب شكل الغاز/الغليان.
+            externalForce += float3(0, 1, 0) * (side * sloshMag * particleSloshLiftForce * surfaceWeight * 0.18);
         }
     }
 
 // PBF Prediction: x* = x + (v + f*dt)*dt
-    velocities[i] += externalForce * dt;
-    predictedPos[i] = positions[i] + velocities[i] * dt;
+    v += externalForce * dt;
+    velocities[i] = v;
+    predictedPos[i] = positions[i] + v * dt;
     deltaPos[i] = float3(0, 0, 0);
     lambdas[i] = 0;
 }
@@ -329,16 +345,15 @@ void ClampPredicted(uint3 id : SV_DispatchThreadID)
     predictedPos[i] += dp;
     deltaPos[i] = float3(0, 0, 0);
 
-    float3 offset = predictedPos[i] - bucketCenter;
-    float vert = dot(offset, bucketUp);
-    float3 horizVec = offset - bucketUp * vert;
-    float horizDist = length(horizVec);
+    float3 p = predictedPos[i];
+    float vert = clamp(p.y, bucketBottom, bucketTop);
+    float2 xz = p.xz;
+    float horizDist = length(xz);
 
-    vert = clamp(vert, bucketBottom, bucketTop);
     if (horizDist > bucketRadius && horizDist > 0.001)
-        horizVec = (horizVec / horizDist) * bucketRadius;
+        xz = (xz / horizDist) * bucketRadius;
 
-    predictedPos[i] = bucketCenter + horizVec + bucketUp * vert;
+    predictedPos[i] = float3(xz.x, vert, xz.y);
 }
 
 // Pass 4: ApplyCorrection
@@ -409,66 +424,105 @@ void EnforceBoundary(uint3 id : SV_DispatchThreadID)
     if (states[i] != 0)
         return;
 
-    float3 offset = positions[i] - bucketCenter;
-    float vert = dot(offset, bucketUp);
-    float3 horizVec = offset - bucketUp * vert;
-    float horizDist = length(horizVec);
+    float3 p = positions[i];
+    float vert = p.y;
+    float2 xz = p.xz;
+    float horizDist = length(xz);
 
     float localBucketTop = bucketTop;
-    if (enableParticleSloshing != 0)
+    float3 sloshVec = float3(particleSloshVector.x, 0.0, particleSloshVector.z);
+    float sloshMag = length(sloshVec);
+
+    if (enableParticleSloshing != 0 && sloshMag > 0.0001 && bucketRadius > 0.0001)
     {
-        float sloshMag = length(particleSloshVector);
-        if (sloshMag > 0.0001 && bucketRadius > 0.0001)
-        {
-            float3 sloshDir = particleSloshVector / sloshMag;
-            float side = dot(horizVec, sloshDir) / bucketRadius;
-            localBucketTop = bucketTop + side * particleSloshSurfaceSlope * sloshMag;
-        }
+        float motion = bucketMotionAmount;
+        float3 sloshDir3 = sloshVec / sloshMag;
+        float2 sloshDir = sloshDir3.xz;
+        float side = dot(xz, sloshDir) / bucketRadius;
+        localBucketTop = bucketTop + side * particleSloshSurfaceSlope * sloshMag * motion;
+
+        float denom2 = max(bucketTop - bucketBottom, 0.001);
+        float height01b = saturate((vert - bucketBottom) / denom2);
+        float wTop = smoothstep(0.45, 1.0, height01b) * motion;
+
+        // لا ندفع الجزيئات للأعلى باستمرار. فقط إزاحة جانبية صغيرة عند الحركة.
+        xz += sloshDir * (sloshMag * wTop * 0.0012);
+        horizDist = length(xz);
     }
 
-    if (enableParticleSloshing != 0)
-    {
-        float sloshMag2 = length(particleSloshVector);
-        if (sloshMag2 > 0.0001 && bucketRadius > 0.0001)
-        {
-            float3 sloshDir2 = particleSloshVector / sloshMag2;
-            float side2 = clamp(dot(horizVec, sloshDir2) / bucketRadius, -1.0, 1.0);
-            float denom2 = max(bucketTop - bucketBottom, 0.001);
-            float height01b = saturate((vert - bucketBottom) / denom2);
-            float wTop = smoothstep(0.35, 1.0, height01b);
-            float targetOffset = side2 * particleSloshSurfaceSlope * sloshMag2 * wTop;
-            vert += targetOffset * 0.035;
-            horizVec += sloshDir2 * (sloshMag2 * wTop * 0.003);
-        }
-    }
+    float3 v = velocities[i];
 
     if (vert < bucketBottom)
     {
         vert = bucketBottom;
-        positions[i] = bucketCenter + horizVec + bucketUp * vert;
-        float vy = dot(velocities[i], bucketUp);
+        float vy = v.y;
         if (vy < 0)
-            velocities[i] -= bucketUp * vy; // ( *1.5)
+            v.y -= vy;
     }
 
-// sloshing
     if (vert > localBucketTop)
     {
         vert = localBucketTop;
-        positions[i] = bucketCenter + horizVec + bucketUp * vert;
-        float vy = dot(velocities[i], bucketUp);
+        float vy = v.y;
         if (vy > 0)
-            velocities[i] -= bucketUp * vy;
+            v.y -= vy;
     }
 
     if (horizDist > bucketRadius && horizDist > 0.001)
     {
-        float3 radDir = horizVec / horizDist;
-        positions[i] = bucketCenter + radDir * bucketRadius + bucketUp * vert;
-        float vRad = dot(velocities[i], radDir);
+        float2 radDir = xz / horizDist;
+        xz = radDir * bucketRadius;
+        float vRad = dot(v.xz, radDir);
         if (vRad > 0)
-            velocities[i] -= radDir * vRad; // ( *1.2)
+            v.xz -= radDir * vRad;
     }
+
+    velocities[i] = v;
+    positions[i] = float3(xz.x, vert, xz.y);
+}
+
+
+// Pass 6: DampInsideFluid
+// Anti-boiling: remove numerical energy after constraints/boundaries.
+#pragma kernel DampInsideFluid
+
+[numthreads(256, 1, 1)]
+void DampInsideFluid(uint3 id : SV_DispatchThreadID)
+{
+    int i = (int) id.x;
+    if (i >= particleCount)
+        return;
+    if (states[i] != 0)
+        return;
+
+    float3 v = velocities[i];
+    float still = saturate(1.0 - bucketMotionAmount);
+    float damping = insideVelocityDamping + stillSettleDamping * still;
+    v *= exp(-damping * dt);
+
+    // إذا الجزيئة ملتصقة بالقاع أو الجدار، لا نسمح للمركبة الخارجة أن ترتد رقمياً للأبد.
+    float3 p = positions[i];
+    if (p.y <= bucketBottom + h * 0.12 && v.y < 0.0)
+        v.y = 0.0;
+
+    float2 xz = p.xz;
+    float r = length(xz);
+    if (r >= bucketRadius - h * 0.10 && r > 0.0001)
+    {
+        float2 n = xz / r;
+        float vr = dot(v.xz, n);
+        if (vr > 0.0)
+            v.xz -= n * vr;
+    }
+
+    float sleep = velocitySleepThreshold;
+    if (still > 0.7)
+        sleep *= 1.8;
+
+    if (dot(v, v) < sleep * sleep)
+        v = float3(0, 0, 0);
+
+    velocities[i] = v;
 }
 
 // Pass 7: FallingStep
@@ -484,9 +538,11 @@ void FallingStep(uint3 id : SV_DispatchThreadID)
     if (states[i] != 1)
         return; // 1 = FALLING
 
-    velocities[i].y -= gravity * dt;
-    velocities[i] *= 0.995;
-    positions[i] += velocities[i] * dt;
+    float3 v = velocities[i];
+    v.y -= gravity * dt;
+    v *= 0.995;
+    velocities[i] = v;
+    positions[i] += v * dt;
 }
 // Pass: ApplyViscosity (XSPH)
 // ( UpdateVelocity)
@@ -523,7 +579,10 @@ void ApplyViscosity(uint3 id : SV_DispatchThreadID)
     }
 
     if (wSum > 0.0)
-        velocities[i] += viscosity * (vSmooth / wSum);
+    {
+        vi += viscosity * (vSmooth / wSum);
+        velocities[i] = vi;
+    }
 }
 
 // Pass: ApplyCohesion Surface Tension / Cohesion
@@ -589,8 +648,10 @@ void ApplyCohesion(uint3 id : SV_DispatchThreadID)
         if (repelCount > 0.0)
             force += (repelDir / repelCount) * particleCohesionRepulsion; // متوسّط بدل مجموع خام — ما عاد يكبر مع عدد الجيران
 
-        velocities[i] += force * dt;
-        velocities[i] *= max(0.0, 1.0 - particleCohesionDamping * dt);
+        float3 v = velocities[i];
+        v += force * dt;
+        v *= max(0.0, 1.0 - particleCohesionDamping * dt);
+        velocities[i] = v;
     }
 
     // Sleep threshold: cohesion + repulsion keep fighting near the walls

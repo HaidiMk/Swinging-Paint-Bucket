@@ -10,7 +10,7 @@ public class PaintParticleRenderer : MonoBehaviour
     public Material material;                       // uses Custom/PaintParticleInstancedURP
 
     [Header("Look")]
-    [Range(0.01f, 0.3f)] public float particleScale = 0.035f;
+    [Range(0.005f, 0.08f)] public float particleScale = 0.018f;
 
     Mesh quadMesh;
     ComputeBuffer argsBuffer;
@@ -32,14 +32,16 @@ public class PaintParticleRenderer : MonoBehaviour
         int count = solver.ParticleCount;
         if (count != cachedCount) { BuildArgs(count); cachedCount = count; }
 
-        // Bind GPU buffers (these stay on the GPU � no readback)
+        // Bind GPU buffers (these stay on the GPU - no readback)
         material.SetBuffer("_Positions", solver.PositionsBuffer);
         material.SetBuffer("_States", solver.StatesBuffer);
 
         // Per-frame params for size + depth colouring
         material.SetFloat("_Scale", particleScale);
         material.SetVector("_BucketCenter", solver.BucketCenter);
+        material.SetVector("_BucketRight", solver.BucketRightDir);
         material.SetVector("_BucketUp", solver.BucketUpDir);
+        material.SetVector("_BucketForward", solver.BucketForwardDir);
         material.SetFloat("_BucketHeight", solver.bucketWorldHeight);
         Color current = solver.simpleLayerVisuals ? solver.CurrentPaintColor() : solver.paintColor;
         Color dark = Color.Lerp(current, Color.black, 0.45f);

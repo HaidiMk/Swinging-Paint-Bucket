@@ -287,7 +287,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::ControlPanelUI
   pendulum: {fileID: 1206993304}
   solver: {fileID: 967485741}
-  bucketHole: {fileID: 967485740}
+  bucketHole: {fileID: 0}
   toggleKey: 9
   visible: 1
 --- !u!4 &405365520
@@ -646,7 +646,7 @@ MonoBehaviour:
   holeHeightFromBottom: 0
   spillAngleThreshold: 5
   overflowAngleThreshold: 80
-  particlesPerSecond: 5.8
+  particlesPerSecond: 10
   overflowParticlesPerSecond: 33
   velocityBoostFactor: 1.75
   enableTorricelli: 1
@@ -673,10 +673,10 @@ MonoBehaviour:
   canvasRenderer: {fileID: 829268567}
   pbfComputeShader: {fileID: 7200000, guid: d47f37d3181feb347ae1cae2b90d28e1, type: 3}
   paintType: 0
-  surfaceType: 1
+  surfaceType: 0
   enableSurfaceEffects: 1
-  surfaceEffectStrength: 0.043
-  maxParticles: 300000
+  surfaceEffectStrength: 0.65
+  maxParticles: 40000
   h: 0.06
   autoComputeH: 1
   targetNeighborCount: 42
@@ -705,9 +705,9 @@ MonoBehaviour:
   visualParticleSize: 0.015
   enableLayeredPaintColors: 1
   layerPaintColors:
-  - {r: 0.04274108, g: 0.48931628, b: 0.98490566, a: 1}
-  - {r: 1, g: 0.92156863, b: 0.2627451, a: 1}
-  particlesPerLayer: 2500
+  - {r: 1, g: 0, b: 0.04551792, a: 1}
+  - {r: 0, g: 0.45147896, b: 1, a: 1}
+  particlesPerLayer: 1000
   simpleLayerVisuals: 1
   enableLightCanvasMixing: 1
   canvasMixStrength: 0.82
@@ -716,14 +716,14 @@ MonoBehaviour:
   maxImpactsPerReadback: 172
   verboseDebugLogs: 1
   enableParticleSloshing: 1
-  particleSloshStrength: 0.95
-  particleSloshResponse: 9
-  particleSloshDamping: 4.5
-  particleSloshForce: 4.2
-  particleSloshLiftForce: 6.5
+  particleSloshStrength: 1.05
+  particleSloshResponse: 10.5
+  particleSloshDamping: 5.8
+  particleSloshForce: 3.2
+  particleSloshLiftForce: 1.6
   particleSloshTurnBoost: 0.55
   particleSloshSurfaceSlope: 0.22
-  particleSloshSurfaceBias: 0.75
+  particleSloshSurfaceBias: 0.88
   showParticleSloshGizmo: 1
   insideVelocityDamping: 1.35
   stillSettleDamping: 12
@@ -734,12 +734,12 @@ MonoBehaviour:
   gravityScale: 0.6
   bucketInfluence: 0.3
   SIGMA: 0.3
-  viscosity: 0.3
+  viscosity: 0.42
   enableParticleCohesion: 1
-  particleCohesionStrength: 2.2
+  particleCohesionStrength: 1.55
   particleCohesionRadius: 0.85
   particleCohesionRepulsion: 0.45
-  particleCohesionDamping: 0.55
+  particleCohesionDamping: 1.35
   saveFolder: C:\Users\Haidi\VR_Project
 --- !u!114 &967485742
 MonoBehaviour:
@@ -755,7 +755,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PaintParticleRenderer
   solver: {fileID: 967485741}
   material: {fileID: 2100000, guid: ff16b42a35384dc4cab212ad96f86f49, type: 2}
-  particleScale: 0.06
+  particleScale: 0.018
 --- !u!1001 &1006875360
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -897,7 +897,7 @@ MonoBehaviour:
   ropeStiffness: 10000
   radialDamping: 0.01
   ropeOnlyPullsNoPush: 1
-  enableRopeTwist: 1
+  enableRopeTwist: 0
   ropeTwistStiffness: 8
   ropeTwistDamping: 1
   thetaDeg: 30
@@ -913,7 +913,7 @@ MonoBehaviour:
   jointFriction: 0.02
   humidity: 0.302
   windVelocity: {x: 0, y: 0, z: 0}
-  n_swings: 10
+  n_swings: 25
   floorY: -1
   bounce: 0.15
   timeScale: 1

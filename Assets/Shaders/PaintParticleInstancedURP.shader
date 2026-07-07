@@ -39,9 +39,11 @@
             float  _SpecStrength;
             float  _AmbientBoost;
 
-            // Set every frame from C# for depth-based colouring
+            // Set every frame from C#. INSIDE particle positions are bucket-fluid-local.
             float3 _BucketCenter;
+            float3 _BucketRight;
             float3 _BucketUp;
+            float3 _BucketForward;
             float  _BucketHeight;
             float4 _PaintColor;
             float4 _PaintColorDark;
@@ -64,8 +66,14 @@
             {
                 Varyings OUT;
 
-                float3 center = _Positions[instanceID];
+                float3 rawPos = _Positions[instanceID];
                 int    state  = _States[instanceID];
+
+                // state 0 = INSIDE stored in bucket-fluid-local space.
+                // state 1 = FALLING already stored in world-space.
+                float3 center = (state == 0)
+                    ? (_BucketCenter + _BucketRight * rawPos.x + _BucketUp * rawPos.y + _BucketForward * rawPos.z)
+                    : rawPos;
 
                 // Hide particles that already landed on the canvas (state == 2)
                 float scale = (state == 2) ? 0.0 : _Scale;
@@ -80,7 +88,7 @@
                 OUT.uv = IN.uv;
 
                 // Depth-based colour: dark at the bottom of the bucket -> light at the top
-                float depth  = dot(center - _BucketCenter, _BucketUp);
+                float depth  = (state == 0) ? rawPos.y : dot(center - _BucketCenter, _BucketUp);
                 float halfH  = _BucketHeight * 0.5;
                 float t      = saturate((depth + halfH) / halfH);
                 OUT.color = lerp(_PaintColorDark, _PaintColor, t);

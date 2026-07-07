@@ -1,14 +1,19 @@
 ﻿using UnityEngine;
 
 // ════════════════════════════════════════════════════════════════════
-//  SphericalPendulum.cs  v2.6
-//  التعديلات عن v2.5:
-//  [FIX-12] CheckStopConditions — شرط fullyDone أصبح يعتمد على الطاقة
-//           بدل theta < 0.003f (كان صارماً جداً ويسبب توقفاً مفاجئاً)
-//           الآن: angularEnergy < 0.0005f || fadeOutTimer >= fadeOutDuration
-//           يضمن التوقف بعد انتهاء مدة التخميد حتى لو theta لم يصل الصفر
-//  [FIX-13] fadeOutFriction — يزيد خطياً لا تربيعياً لتخميد أكثر سلاسة
-//           مع حد أقصى 6 بدل 8 (8 كان يسبب رجة مرئية عند البداية)
+//  SphericalPendulum.cs  v2.7
+//  التعديلات عن v2.6:
+//  [FIX-14] UpdatePosition — كان الدلو يوقف "منحرفًا شوي" رغم أن θ=0:
+//           Quaternion.LookRotation(ropeDir, Vector3.up) تنهار رياضيًا لما
+//           يصير ropeDir موازيًا لـ Vector3.up (الدلو تحت الـ pivot تمامًا
+//           عند السكون) فتُرجِع دورانًا بميلان عشوائي.
+//           الحل: نبني الدوران من متجهات الوحدة الكروية نفسها المستخدمة
+//           بالفيزياء (forward = eR على اتجاه الحبل، up = eTheta) — متعامدان
+//           دائمًا ومعرّفان حتى عند θ=0، والنتيجة مطابقة تمامًا للسلوك
+//           القديم أثناء الحركة. كذلك ما عاد φ يُصفَّر عند الرجوع للسكون
+//           (تصفيره كان يلفّ الدلو حول محوره الرأسي بلا داعٍ).
+//  [FIX-15] بقايا فتل الحبل واهتزاز الدلو تُخمَد بنعومة عند التوقف بدل ما
+//           تبقى مجمّدة على آخر قيمة (لأن FixedUpdate يتوقف بعد StopSimulation).
 // ════════════════════════════════════════════════════════════════════
 
 public class SphericalPendulum : MonoBehaviour
@@ -179,7 +184,14 @@ public class SphericalPendulum : MonoBehaviour
 
         float speed = 2.5f; // سرعة الرجوع — رفعها لو بدك أسرع
         theta = Mathf.Lerp(theta, 0f, Time.deltaTime * speed);
-        phi = Mathf.Lerp(phi, 0f, Time.deltaTime * speed);
+
+        // [FIX-14] ما منلمس φ: عند θ≈0 هو مجرد دوران حول المحور الرأسي،
+        // وتصفيره كان يلفّ الدلو حول نفسه وهو واقف بلا أي معنى فيزيائي.
+
+        // [FIX-15] فتل الحبل والاهتزاز يرجعوا للصفر بنعومة هنّ كمان،
+        // وإلا بيضلوا مجمّدين على آخر قيمة (FixedUpdate واقف بعد التوقف)
+        ropeTwistAngle = Mathf.Lerp(ropeTwistAngle, 0f, Time.deltaTime * speed);
+        vibrationStrength = Mathf.Lerp(vibrationStrength, 0f, Time.deltaTime * speed);
 
         UpdatePosition();
 
@@ -187,7 +199,9 @@ public class SphericalPendulum : MonoBehaviour
         if (theta < 0.002f)
         {
             theta = 0f;
-            phi = 0f;
+            ropeTwistAngle = 0f;
+            ropeTwistVelocity = 0f;
+            vibrationStrength = 0f;
             returningToRest = false;
             UpdatePosition();
         }
@@ -332,14 +346,18 @@ public class SphericalPendulum : MonoBehaviour
             bucket.localScale = new Vector3(s, s, s);
         }
 
-        Vector3 ropeDir = (worldPos - pivotPosition).normalized;
-        if (ropeDir.sqrMagnitude > 0.001f)
-        {
-            Quaternion swingRot = Quaternion.LookRotation(ropeDir, Vector3.up);
-            if (enableRopeTwist)
-                swingRot *= Quaternion.AngleAxis(ropeTwistAngle * Mathf.Rad2Deg, Vector3.up);
-            bucket.rotation = swingRot;
-        }
+        // [FIX-14] LookRotation(ropeDir, Vector3.up) كانت تنهار لما ropeDir
+        // يوازي Vector3.up (أي θ≈0 والدلو واقف تحت الـ pivot تمامًا) →
+        // دوران بميلان عشوائي، فكان الدلو يوقف "منحرف شوي".
+        // الحل: نفس الإطار مبني من متجهات الوحدة الكروية (eR = اتجاه الحبل،
+        // eTheta = العمودي عليه). متعامدان دائمًا ومعرّفان حتى عند θ=0،
+        // والنتيجة مطابقة للسلوك القديم أثناء الحركة الطبيعية.
+        Vector3 eR, eTheta, ePhi;
+        GetUnitVectors(theta, phi, out eR, out eTheta, out ePhi);
+        Quaternion swingRot = Quaternion.LookRotation(eR, eTheta);
+        if (enableRopeTwist)
+            swingRot *= Quaternion.AngleAxis(ropeTwistAngle * Mathf.Rad2Deg, Vector3.up);
+        bucket.rotation = swingRot;
     }
 
     // ════════════════════════════════════════════════════════════════
