@@ -45,7 +45,10 @@ public class BucketHole : MonoBehaviour
     [Range(2f, 20f)] public float trailMaxThickness = 8f;
 
     [Header("Debug")]
-    public bool showLog = true;
+    [Tooltip("فعّلها فقط وقت التشخيص. إطفاؤها أفضل للأداء مع أعداد كبيرة.")]
+    public bool showLog = false;
+    [Tooltip("عدد الفريمات بين كل Log إذا showLog مفعلة.")]
+    [Range(60, 1800)] public int logEveryFrames = 600;
 
     float spawnTimer = 0f;
     float overflowTimer = 0f;
@@ -143,7 +146,7 @@ public class BucketHole : MonoBehaviour
         }
         else overflowTimer = 0f;
 
-        if (showLog && frameCount % 120 == 0)
+        if (showLog && frameCount % Mathf.Max(60, logEveryFrames) == 0)
             Debug.Log($"[BucketHole] Tilt={tiltDeg:F1}° | Speed={bucketSpeed:F2} " +
                       $"| Torricelli={torricelliFactor:F2} | Spawned={totalSpawned}");
     }

@@ -129,6 +129,7 @@ public class PBFSolver : MonoBehaviour
     [Range(0f, 1f)] public float paintDepositStrength = 0.72f;
     [Range(1, 10)] public int canvasApplyEveryNFrames = 4;
     [Range(1, 200)] public int maxImpactsPerReadback = 30;
+    [Tooltip("فعّلها فقط وقت التشخيص. إطفاؤها يحذف اللوجات المتكررة ويحسن الأداء مع أعداد كبيرة.")]
     public bool verboseDebugLogs = false;
 
     [Header("Particle Sloshing Inside Bucket — حركة الجزيئات داخل الدلو")]
@@ -367,7 +368,8 @@ public class PBFSolver : MonoBehaviour
         float sphereVolumeNeeded = targetNeighborCount / Mathf.Max(density, 0.0001f);
         h = Mathf.Pow(sphereVolumeNeeded / (4f / 3f * Mathf.PI), 1f / 3f);
 
-        Debug.Log($"[PBFSolver] h تلقائي = {h:F4} (جيران مستهدفة={targetNeighborCount}, كثافة={density:F0} جزيء/م3)");
+        if (verboseDebugLogs)
+            Debug.Log($"[PBFSolver] h تلقائي = {h:F4} (جيران مستهدفة={targetNeighborCount}, كثافة={density:F0} جزيء/م3)");
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -386,7 +388,8 @@ public class PBFSolver : MonoBehaviour
         CalibrateRestDensityScale();
         ResetBucketMotionTracking();
         initialized = true;
-        Debug.Log($"[PBFSolver] أعيد التشغيل — Particles={maxParticles}");
+        if (verboseDebugLogs)
+            Debug.Log($"[PBFSolver] أعيد التشغيل — Particles={maxParticles}");
     }
 
     void Start()
@@ -408,7 +411,8 @@ public class PBFSolver : MonoBehaviour
         ResetBucketMotionTracking();
 
         initialized = true;
-        Debug.Log($"[PBFSolver] Initialized — Particles={maxParticles} | GPU=RTX2050 | Iterations={solverIterations}");
+        if (verboseDebugLogs)
+            Debug.Log($"[PBFSolver] Initialized — Particles={maxParticles} | Iterations={solverIterations}");
     }
 
 
@@ -465,7 +469,8 @@ public class PBFSolver : MonoBehaviour
         );
 
         totalCells = gridSizeX * gridSizeY * gridSizeZ;
-        Debug.Log($"[PBF] Grid: {gridSizeX}x{gridSizeY}x{gridSizeZ} = {totalCells} cells");
+        if (verboseDebugLogs)
+            Debug.Log($"[PBF] Grid: {gridSizeX}x{gridSizeY}x{gridSizeZ} = {totalCells} cells");
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -515,7 +520,8 @@ public class PBFSolver : MonoBehaviour
         long totalBytes = (long)n * (12 * 7 + 4 + 4)
                        + (long)totalCells * (4 + 4 * MAX_PER_CELL)
                        + (long)n * MAX_NEIGHBORS * 4;
-        Debug.Log($"[PBF] GPU Buffers allocated — {totalBytes / 1024 / 1024} MB on GPU");
+        if (verboseDebugLogs)
+            Debug.Log($"[PBF] GPU Buffers allocated — {totalBytes / 1024 / 1024} MB on GPU");
     }
 
     // ربط كل Buffer بكل kernel
@@ -595,7 +601,8 @@ public class PBFSolver : MonoBehaviour
         float measuredDensity = sum / maxParticles;
         float scale = measuredDensity / Mathf.Max(0.01f, restDensity);
         restDensity *= scale;
-        Debug.Log($"[PBFSolver] restDensity بعد التصحيح = {restDensity:F2} (نسبة التصحيح ×{scale:F2})");
+        if (verboseDebugLogs)
+            Debug.Log($"[PBFSolver] restDensity بعد التصحيح = {restDensity:F2} (نسبة التصحيح ×{scale:F2})");
     }
 
     void SpawnParticles()
@@ -682,7 +689,8 @@ public class PBFSolver : MonoBehaviour
         velocitiesBuffer.SetData(initVel);
         statesBuffer.SetData(initSt);
 
-        Debug.Log($"[PBF] Spawned {maxParticles} particles with stable lattice spacing={spacing:F4} → GPU");
+        if (verboseDebugLogs)
+            Debug.Log($"[PBF] Spawned {maxParticles} particles with stable lattice spacing={spacing:F4} → GPU");
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -1607,7 +1615,9 @@ public class PBFSolver : MonoBehaviour
         float fillRatio = (float)insideC / Mathf.Max(maxParticles, 1);
         cachedLiquidHeight = fillRatio * bucketWorldHeight;
 
-        if (frameCount % 30 == 0)
+        // هذا اللوج كان يشتغل كل 30 فريم ويبطّئ مع الأعداد الكبيرة.
+        // خليته يشتغل فقط عند تفعيل Verbose Debug Logs من الـ Inspector.
+        if (verboseDebugLogs && frameCount % 300 == 0)
             Debug.Log($"[PBF-Cache F={frameCount}] " +
                       $"Inside={insideC}/{maxParticles} | " +
                       $"Fill={fillRatio:F3} | " +
