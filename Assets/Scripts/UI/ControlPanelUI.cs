@@ -6,11 +6,14 @@
 //  Organized into tabs so it doesn't turn into one giant scrolling list.
 //
 //  Tabs:
-//  - Swing      : pendulum start angle/direction/swings + environment
+//  - Swing      : pendulum start angle/direction/swings + environment (wind)
+//  - Bucket     : mass, radius, hole, rope
 //  - Paint      : paint type, surface type, brush/splash settings
 //  - Mixing     : canvas mixing strength, cohesion, viscosity, sloshing
 //  - Colors     : the 4 layer colors
-//  - Particles  : particle count (needs restart)
+//  - Canvas     : size, tilt, dripping + particle count (needs restart)
+//  - Report     : live results + save experiment (image + txt report)
+//  - Compare    : last two saved experiments side by side
 //
 //  Press Tab to show/hide the panel.
 // ════════════════════════════════════════════════════════════════════
@@ -28,7 +31,7 @@ public class ControlPanelUI : MonoBehaviour
     Rect windowRect = new Rect(10, 10, 430, 620);
     Vector2 scroll;
 
-    string[] tabNames = { "🌀 Swing", "🪣 Bucket", "🎨 Paint", "🧪 Mixing", "🌈 Colors", "🖼 Canvas", "📊 Report" };
+    string[] tabNames = { "🌀 Swing", "🪣 Bucket", "🎨 Paint", "🧪 Mixing", "🌈 Colors", "🖼 Canvas", "📊 Report", "🔍 Compare" };
     int currentTab = 0;
 
     // Pending slider values — applied only when the "Launch" button is
@@ -191,6 +194,7 @@ public class ControlPanelUI : MonoBehaviour
             case 4: DrawColorsSection(); break;
             case 5: DrawCanvasSection(); DrawParticleCountSection(); break;
             case 6: DrawReportSection(); break;
+            case 7: DrawCompareSection(); break;
         }
 
         GUILayout.EndScrollView();
@@ -292,6 +296,27 @@ public class ControlPanelUI : MonoBehaviour
 
         GUILayout.Label($"Air drag: {pendulum.dragCoefficient:F2}", sliderLabelStyle);
         pendulum.dragCoefficient = GUILayout.HorizontalSlider(pendulum.dragCoefficient, 0f, 1.5f);
+
+        // ── الرياح: المتغير windVelocity موجود أصلاً بمعادلات السحب
+        //    (vRel = vBucket - windVelocity)، هون بس منعرضه للمستخدم
+        GUILayout.Space(6);
+        Vector3 wind = pendulum.windVelocity;
+
+        GUILayout.Label($"Wind X: {wind.x:F1} m/s", sliderLabelStyle);
+        wind.x = GUILayout.HorizontalSlider(wind.x, -10f, 10f);
+
+        GUILayout.Label($"Wind Z: {wind.z:F1} m/s", sliderLabelStyle);
+        wind.z = GUILayout.HorizontalSlider(wind.z, -10f, 10f);
+
+        pendulum.windVelocity = wind;
+
+        if (GUILayout.Button("No Wind (0, 0)", buttonStyle))
+            pendulum.windVelocity = Vector3.zero;
+
+        // الرياح بتأثر عن طريق قوة السحب، فإذا السحب صفر ما رح يبين إلها أثر
+        if (pendulum.dragCoefficient <= 0.01f)
+            GUILayout.Label("(wind has no effect while Air drag = 0)", sliderLabelStyle);
+
         GUILayout.EndVertical();
     }
 
@@ -695,5 +720,114 @@ public class ControlPanelUI : MonoBehaviour
         {
             GUI.color = old;
         }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //  Compare tab — بيقرأ آخر صورتين محفوظتين (canvas_*.png) من مجلد
+    //  الحفظ نفسه يلي بيستخدمه SaveExperiment() وبيعرضهن جنب بعض.
+    // ════════════════════════════════════════════════════════════════
+    Texture2D compareTexOld, compareTexNew;
+    string compareNameOld = "", compareNameNew = "";
+    bool compareLoadedOnce = false;
+
+    // نفس منطق المجلد الموجود في PBFSolver.SaveExperiment()
+    string GetSaveDirectory()
+    {
+        if (solver != null && !string.IsNullOrEmpty(solver.saveFolder))
+            return solver.saveFolder;
+        return System.IO.Path.Combine(Application.persistentDataPath, "PaintResults");
+    }
+
+    Texture2D LoadPng(string path)
+    {
+        byte[] bytes = System.IO.File.ReadAllBytes(path);
+        Texture2D tex = new Texture2D(2, 2);
+        tex.LoadImage(bytes); // بيعيد تحجيم التكستشر تلقائياً حسب الصورة
+        return tex;
+    }
+
+    void LoadLastTwoExperiments()
+    {
+        compareLoadedOnce = true;
+
+        // تنظيف الصور القديمة قبل تحميل الجديدة
+        if (compareTexOld != null) Destroy(compareTexOld);
+        if (compareTexNew != null) Destroy(compareTexNew);
+        compareTexOld = compareTexNew = null;
+        compareNameOld = compareNameNew = "";
+
+        string dir = GetSaveDirectory();
+        if (!System.IO.Directory.Exists(dir)) return;
+
+        string[] files = System.IO.Directory.GetFiles(dir, "canvas_*.png");
+        // اسم الملف فيه الطابع الزمني yyyyMMdd_HHmmss،
+        // فالترتيب الأبجدي = الترتيب الزمني
+        System.Array.Sort(files);
+
+        if (files.Length >= 1)
+        {
+            string newest = files[files.Length - 1];
+            compareTexNew = LoadPng(newest);
+            compareNameNew = System.IO.Path.GetFileName(newest);
+        }
+        if (files.Length >= 2)
+        {
+            string previous = files[files.Length - 2];
+            compareTexOld = LoadPng(previous);
+            compareNameOld = System.IO.Path.GetFileName(previous);
+        }
+    }
+
+    void DrawCompareSection()
+    {
+        GUILayout.BeginVertical(sectionBoxStyle);
+        DrawSectionHeader("COMPARE EXPERIMENTS");
+
+        // أول مرة بيفتح التبويب منحمّل تلقائياً
+        if (!compareLoadedOnce)
+            LoadLastTwoExperiments();
+
+        if (GUILayout.Button("🔄  Reload Last Two Saved", buttonStyle))
+            LoadLastTwoExperiments();
+
+        GUILayout.Space(6);
+
+        if (compareTexNew == null)
+        {
+            GUILayout.Label("No saved experiments found.", labelStyle);
+            GUILayout.Label("Save from the Report tab first,", sliderLabelStyle);
+            GUILayout.Label("then press Reload.", sliderLabelStyle);
+            GUILayout.EndVertical();
+            return;
+        }
+
+        GUILayout.BeginHorizontal();
+        DrawCompareColumn("Previous", compareNameOld, compareTexOld);
+        GUILayout.Space(8);
+        DrawCompareColumn("Latest", compareNameNew, compareTexNew);
+        GUILayout.EndHorizontal();
+
+        GUILayout.Space(4);
+        GUILayout.Label("Folder: " + GetSaveDirectory(), sliderLabelStyle);
+        GUILayout.EndVertical();
+    }
+
+    void DrawCompareColumn(string title, string fileName, Texture2D tex)
+    {
+        GUILayout.BeginVertical(GUILayout.Width(185));
+        GUILayout.Label(title, labelStyle);
+
+        if (tex != null)
+        {
+            Rect r = GUILayoutUtility.GetRect(180, 180,
+                GUILayout.Width(180), GUILayout.Height(180));
+            GUI.DrawTexture(r, tex, ScaleMode.ScaleToFit);
+            GUILayout.Label(fileName, sliderLabelStyle);
+        }
+        else
+        {
+            GUILayout.Label("(only one experiment saved)", sliderLabelStyle);
+        }
+        GUILayout.EndVertical();
     }
 }
