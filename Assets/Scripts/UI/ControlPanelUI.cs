@@ -386,6 +386,91 @@ public class ControlPanelUI : MonoBehaviour
             GUILayout.Label($"Canvas depth scale: {s.z:F2}", sliderLabelStyle);
             s.z = GUILayout.HorizontalSlider(s.z, 0.2f, 5f);
             solver.canvasTransform.localScale = s;
+
+            GUILayout.Space(6);
+            DrawSectionHeader("CANVAS POSITION  (live)");
+            Vector3 pos = solver.canvasTransform.localPosition;
+            GUILayout.Label($"Canvas Y position / near-far: {pos.y:F2}", sliderLabelStyle);
+            pos.y = GUILayout.HorizontalSlider(pos.y, -5f, 5f);
+
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("Y - 0.25", buttonStyle)) pos.y -= 0.25f;
+            if (GUILayout.Button("Y + 0.25", buttonStyle)) pos.y += 0.25f;
+            if (GUILayout.Button("Reset Y", buttonStyle)) pos.y = 0f;
+            GUILayout.EndHorizontal();
+
+            solver.canvasTransform.localPosition = pos;
+
+            GUILayout.Space(6);
+            DrawSectionHeader("CANVAS PROJECTION  (live)");
+            solver.useTrajectoryCanvasProjection = GUILayout.Toggle(
+                solver.useTrajectoryCanvasProjection, " Use trajectory impact projection", toggleStyle);
+
+            GUILayout.Label($"Impact tolerance: {solver.canvasImpactTolerance:F3} m", sliderLabelStyle);
+            solver.canvasImpactTolerance = GUILayout.HorizontalSlider(solver.canvasImpactTolerance, 0.005f, 0.25f);
+
+            GUILayout.Label($"Backtrack multiplier: {solver.impactBacktrackMultiplier:F2}", sliderLabelStyle);
+            solver.impactBacktrackMultiplier = GUILayout.HorizontalSlider(solver.impactBacktrackMultiplier, 0.5f, 3f);
+
+            GUILayout.Space(6);
+            DrawSectionHeader("CANVAS TILT & DRIPS");
+            solver.enableCanvasTiltControls = GUILayout.Toggle(
+                solver.enableCanvasTiltControls, " Enable canvas tilt controls", toggleStyle);
+
+            if (solver.enableCanvasTiltControls)
+            {
+                GUILayout.Label($"Tilt X: {solver.canvasTiltXDeg:F1}°", sliderLabelStyle);
+                solver.canvasTiltXDeg = GUILayout.HorizontalSlider(solver.canvasTiltXDeg, -75f, 75f);
+
+                GUILayout.Label($"Tilt Z: {solver.canvasTiltZDeg:F1}°", sliderLabelStyle);
+                solver.canvasTiltZDeg = GUILayout.HorizontalSlider(solver.canvasTiltZDeg, -75f, 75f);
+
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("Flat", buttonStyle))
+                {
+                    solver.canvasTiltXDeg = 0f;
+                    solver.canvasTiltZDeg = 0f;
+                }
+                if (GUILayout.Button("Slight Tilt", buttonStyle))
+                {
+                    solver.canvasTiltXDeg = 18f;
+                    solver.canvasTiltZDeg = 0f;
+                }
+                if (GUILayout.Button("Side Tilt", buttonStyle))
+                {
+                    solver.canvasTiltXDeg = 0f;
+                    solver.canvasTiltZDeg = 18f;
+                }
+                GUILayout.EndHorizontal();
+            }
+
+            solver.enablePaintDripping = GUILayout.Toggle(
+                solver.enablePaintDripping, " Enable paint dripping on tilted canvas", toggleStyle);
+
+            if (solver.enablePaintDripping)
+            {
+                solver.invertCanvasDripV = GUILayout.Toggle(
+                    solver.invertCanvasDripV, " Invert drip V direction (fix upward dripping)", toggleStyle);
+
+
+                GUILayout.Label($"Drip strength: {solver.dripStrength:F2}", sliderLabelStyle);
+                solver.dripStrength = GUILayout.HorizontalSlider(solver.dripStrength, 0f, 2f);
+
+                GUILayout.Label($"Drip every N frames: {solver.dripEveryNFrames}", sliderLabelStyle);
+                solver.dripEveryNFrames = Mathf.RoundToInt(GUILayout.HorizontalSlider(solver.dripEveryNFrames, 1, 30));
+
+                GUILayout.Label($"Max drip pixels/step: {solver.maxDripPixelsPerStep}", sliderLabelStyle);
+                solver.maxDripPixelsPerStep = Mathf.RoundToInt(GUILayout.HorizontalSlider(solver.maxDripPixelsPerStep, 1, 10));
+
+                GUILayout.Label($"Drip threshold: {solver.dripThreshold:F2}", sliderLabelStyle);
+                solver.dripThreshold = GUILayout.HorizontalSlider(solver.dripThreshold, 0.01f, 0.35f);
+
+                GUILayout.Label($"Drip drying: {solver.dripDrying:F2}", sliderLabelStyle);
+                solver.dripDrying = GUILayout.HorizontalSlider(solver.dripDrying, 0f, 1f);
+
+                GUILayout.Label($"Drip color mixing boost: {solver.dripMixBoost:F2}", sliderLabelStyle);
+                solver.dripMixBoost = GUILayout.HorizontalSlider(solver.dripMixBoost, 0f, 2f);
+            }
         }
         else
         {

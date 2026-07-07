@@ -95,6 +95,50 @@ public class PBFSolver : MonoBehaviour
     [Range(1, 20)] public int readbackInterval = 6; // أخف: نكشف الاصطدام كل عدة frames
     [Range(0.1f, 0.8f)] public float dropletSizeRatio = 0.3f;
 
+    [Header("Canvas Projection — إسقاط الدهان على اللوحة")]
+    [Tooltip("يرسم على نقطة تقاطع مسار الجزيئة مع مستوى اللوحة بدل الإسقاط العمودي من موقعها الحالي. هذا يصحح الإزاحة عند ميلان اللوحة أو عند readbackInterval كبير.")]
+    public bool useTrajectoryCanvasProjection = true;
+
+    [Tooltip("سماحية اصطدام صغيرة حول مستوى اللوحة حتى لا تفلت الجزيئات بين فريمات القراءة.")]
+    [Range(0.005f, 0.25f)] public float canvasImpactTolerance = 0.08f;
+
+    [Tooltip("كم نرجع للخلف على مسار الجزيئة عند حساب التقاطع. ارفعه قليلاً إذا كان readbackInterval كبيراً.")]
+    [Range(0.5f, 3f)] public float impactBacktrackMultiplier = 1.35f;
+
+    [Header("Canvas Tilt & Dripping — ميلان اللوحة ونزول الدهان")]
+    [Tooltip("يسمح بتغيير ميلان اللوحة من الواجهة بدون تغيير منطق السائل أو البندول.")]
+    public bool enableCanvasTiltControls = false;
+
+    [Tooltip("ميلان اللوحة للأمام/الخلف بالدرجات. يعمل على Rotation X المحلي للوحة.")]
+    [Range(-75f, 75f)] public float canvasTiltXDeg = 0f;
+
+    [Tooltip("ميلان اللوحة يمين/يسار بالدرجات. يعمل على Rotation Z المحلي للوحة.")]
+    [Range(-75f, 75f)] public float canvasTiltZDeg = 0f;
+
+    [Tooltip("تفعيل نزول الدهان على اللوحة حسب الميلان، نوع الدهان، اللزوجة، ونوع السطح.")]
+    public bool enablePaintDripping = true;
+
+    [Tooltip("قوة سيلان الدهان على اللوحة. ارفعها إذا بدك خطوط نزول أوضح.")]
+    [Range(0f, 2f)] public float dripStrength = 0.75f;
+
+    [Tooltip("كل كم فريم نطبق خطوة سيلان على Texture اللوحة. رقم أكبر = أداء أخف.")]
+    [Range(1, 30)] public int dripEveryNFrames = 6;
+
+    [Tooltip("أقصى عدد بكسلات يمكن للدهان أن ينزلها بكل خطوة.")]
+    [Range(1, 10)] public int maxDripPixelsPerStep = 4;
+
+    [Tooltip("أقل كمية لون مطلوبة قبل ما البقعة تبدأ تنزل. ارفعه إذا السيلان صار كثير.")]
+    [Range(0.01f, 0.35f)] public float dripThreshold = 0.07f;
+
+    [Tooltip("مدى جفاف/تثبيت اللون أثناء السيلان. الورق والقماش يجففان أكثر من المعدن.")]
+    [Range(0f, 1f)] public float dripDrying = 0.18f;
+
+    [Tooltip("قوة مزج ألوان الدهان أثناء نزوله فقط على اللوحة المائلة. لا يغيّر مزج اللوحة الأفقية.")]
+    [Range(0f, 2f)] public float dripMixBoost = 1.35f;
+
+    [Tooltip("يعكس اتجاه السيلان على محور V فقط. يفيد عندما تكون نقطة الاصطدام صحيحة لكن نزول الدهان يظهر للأعلى بصرياً بسبب اتجاه UV/Texture على اللوحة.")]
+    public bool invertCanvasDripV = true;
+
     [Header("Impact mark — أثر السقوط")]
     public bool sprayEnabled = false;         // افتراضياً مطفأ للأداء والواقعية
     [Range(1, 12)] public int exactDotSize = 3; // حجم نقطة محل السقوط
@@ -272,6 +316,8 @@ public class PBFSolver : MonoBehaviour
     // Canvas
     Texture2D canvasTex;
     Color[] canvasPx;
+    Color[] dripScratch;
+    int lastDripFrame = 0;
     bool canvasDirty;
     public string saveFolder = @"C:\Users\Haidi\VR_Project"; // مسار حفظ الصورة والتقرير
     int paintedSplats = 0;     // عدد المسارات (بقع نزلت ع اللوحة)
@@ -953,16 +999,18 @@ public class PBFSolver : MonoBehaviour
             if (statesCPU[i] != FALLING) continue;
 
             Vector3 wp = positionsCPU[i];
-            Vector3 lp = canvasTransform.InverseTransformPoint(wp);
+            Vector3 vel = velocitiesCPU[i];
 
-            // وصلت للسطح أو عبرتو؟ (بدون نافذة رفيعة → ما في تهرّب)
-            bool reached = canvasIsHorizontal ? (lp.y <= 0.08f) : (Mathf.Abs(lp.z) <= 0.08f);
-            if (!reached) continue;
+            // نحسب نقطة التقاطع الحقيقية بين مسار الجزيئة ومستوى اللوحة.
+            // هذا أهم من ProjectOntoCanvas(wp) لأن wp قد يكون تخطى اللوحة بين readbacks،
+            // خصوصاً عندما تكون اللوحة مائلة أو readbackInterval أكبر من 1.
+            if (!TryGetCanvasImpactPoint(wp, vel, out Vector3 hitWorld, out bool hitInsideCanvas))
+                continue;
 
-            bool inBounds = Mathf.Abs(lp.x) < canvasHalfX && Mathf.Abs(lp.z) < canvasHalfZ;
-            if (inBounds)
-                DrawSplash(ProjectOntoCanvas(wp), velocitiesCPU[i], i);
+            if (hitInsideCanvas)
+                DrawSplash(hitWorld, vel, i);
 
+            // حتى لو خارج حدود اللوحة، نعتبرها انتهت حتى لا تظل الجزيئات تخترق المشهد.
             statesCPU[i] = ON_CANVAS;
             anyChange = true;
             impactsThisReadback++;
@@ -1072,11 +1120,7 @@ public class PBFSolver : MonoBehaviour
         if (canvasTransform == null) return;
         paintedSplats++;
 
-        Vector3 lp = canvasTransform.InverseTransformPoint(worldPos);
-        int cx = Mathf.RoundToInt(Mathf.Clamp01((lp.x + canvasHalfX) / (canvasHalfX * 2f)) * canvasWidth);
-        int cy = Mathf.RoundToInt(Mathf.Clamp01((lp.z + canvasHalfZ) / (canvasHalfZ * 2f)) * canvasHeight);
-        if (flipMarkU) cx = canvasWidth - 1 - cx;
-        if (flipMarkV) cy = canvasHeight - 1 - cy;
+        if (!WorldToCanvasPixel(worldPos, out int cx, out int cy, true)) return;
 
         Color col = GetParticleColor(particleIndex);
         float speed = worldVel.magnitude;
@@ -1108,6 +1152,11 @@ public class PBFSolver : MonoBehaviour
             FillCircleSoft(cx, cy, r, main, surfaceSoftness);
         }
 
+        // إذا اللوحة مائلة، ارسم بداية نزول صغيرة فور الاصطدام.
+        // النزول الطويل يستمر لاحقاً في ApplyCanvasPaintDrips داخل Update.
+        if (enablePaintDripping)
+            DrawInitialGravityRun(cx, cy, r, col, speed);
+
         // رذاذ اختياري خفيف جداً، مو عشرات البقع
         if (sprayEnabled && splashDroplets > 0)
         {
@@ -1127,6 +1176,278 @@ public class PBFSolver : MonoBehaviour
         }
 
         canvasDirty = true;
+    }
+
+
+    // ════════════════════════════════════════════════════════════════
+    //  Canvas Tilt & Paint Dripping
+    //  سيلان الدهان على Texture اللوحة حسب ميلان اللوحة ونوع الدهان والسطح
+    // ════════════════════════════════════════════════════════════════
+    Color CanvasBackgroundColor() => new Color(0.95f, 0.92f, 0.85f, 1f);
+
+    void ApplyCanvasTiltTransform()
+    {
+        if (!enableCanvasTiltControls || canvasTransform == null) return;
+
+        Vector3 e = canvasTransform.localEulerAngles;
+        // نحافظ على Y حتى لا نكسر اتجاه اللوحة بالمشهد، ونغير الميلان فقط.
+        canvasTransform.localRotation = Quaternion.Euler(canvasTiltXDeg, e.y, canvasTiltZDeg);
+    }
+
+    bool TryGetCanvasDownDirection(out Vector2 dir, out float tilt01)
+    {
+        dir = Vector2.zero;
+        tilt01 = 0f;
+        if (canvasTransform == null) return false;
+
+        // اتجاه الجاذبية داخل فضاء اللوحة المحلي.
+        // في الوضع الأفقي الرسم على XZ، وفي الوضع العمودي الرسم على XY.
+        Vector3 gLocal = canvasTransform.InverseTransformDirection(Vector3.down);
+
+        // اتجاه الجاذبية في إحداثيات الرسم على الـ Texture.
+        // الإسقاط نفسه صحيح، لكن محور V في عرض الـ Texture على اللوحة يكون غالباً معاكساً
+        // لمحور local Z/ local Y، لذلك نعكس V فقط حتى يظهر سيلان الدهان نزولاً بصرياً
+        // بدل أن يطلع للأعلى. هذا لا يغير مكان نقطة الاصطدام.
+        Vector2 raw = canvasIsHorizontal
+            ? new Vector2(gLocal.x, gLocal.z)
+            : new Vector2(gLocal.x, gLocal.y);
+        if (invertCanvasDripV)
+            raw.y = -raw.y;
+
+        float m = raw.magnitude;
+        tilt01 = Mathf.Clamp01(m);
+
+        if (m < 0.025f) return false; // اللوحة شبه أفقية، ما في نزول واضح
+        dir = raw / m;
+        return true;
+    }
+
+    float GetPaintDripMobility()
+    {
+        // سيولة الدهان قبل حساب اللزوجة الرقمية. الأكبر = ينزل أسرع.
+        switch (paintType)
+        {
+            case PaintType.Ink: return 1.55f;
+            case PaintType.Watercolor: return 1.35f;
+            case PaintType.Tempera: return 0.82f;
+            case PaintType.Acrylic: return 0.62f;
+            case PaintType.Gouache: return 0.48f;
+            case PaintType.Enamel: return 0.38f;
+            case PaintType.OilPaint: return 0.30f;
+            case PaintType.Latex: return 0.22f;
+            default: return 0.6f;
+        }
+    }
+
+    void GetSurfaceDripResponse(out float mobility, out float absorb, out float sideSpread)
+    {
+        // mobility: قابلية الانزلاق على السطح
+        // absorb  : امتصاص/تجفيف، يقلل النزول ويثبت اللون
+        // sideSpread: انتشار جانبي أثناء النزول
+        switch (surfaceType)
+        {
+            case SurfaceType.Paper:
+                mobility = 0.34f; absorb = 0.92f; sideSpread = 0.45f; break;
+            case SurfaceType.Cloth:
+                mobility = 0.46f; absorb = 0.72f; sideSpread = 0.32f; break;
+            case SurfaceType.Wood:
+                mobility = 0.70f; absorb = 0.38f; sideSpread = 0.18f; break;
+            default: // Metal
+                mobility = 1.18f; absorb = 0.08f; sideSpread = 0.08f; break;
+        }
+
+        float k = Mathf.Clamp01(surfaceEffectStrength);
+        mobility = Mathf.Lerp(0.65f, mobility, k);
+        absorb = Mathf.Lerp(0.35f, absorb, k);
+        sideSpread = Mathf.Lerp(0.12f, sideSpread, k);
+    }
+
+    float PixelPaintAmount(Color c)
+    {
+        Color bg = CanvasBackgroundColor();
+        float d = Mathf.Abs(c.r - bg.r) + Mathf.Abs(c.g - bg.g) + Mathf.Abs(c.b - bg.b);
+        return Mathf.Clamp01(d / 1.65f);
+    }
+
+    void BlendDripInto(ref Color dst, Color incoming, float strength)
+    {
+        // هذا خاص بالسيلان فقط. لا نستخدم BlendCanvasPixel هون حتى لا نغيّر
+        // سلوك المزج الأصلي على اللوحة الأفقية.
+        float boosted = Mathf.Clamp01(strength * Mathf.Max(0f, dripMixBoost));
+        dst = BlendDripColorOnly(dst, incoming, boosted);
+        dst.a = 1f;
+    }
+
+    Color BlendDripColorOnly(Color old, Color incoming, float strength)
+    {
+        strength = Mathf.Clamp01(strength);
+        if (!enableLightCanvasMixing)
+        {
+            Color simple = Color.Lerp(old, incoming, strength);
+            simple.a = 1f;
+            return simple;
+        }
+
+        bool blank = old.r > 0.94f && old.g > 0.94f && old.b > 0.94f;
+        if (blank)
+        {
+            Color deposited = Color.Lerp(old, incoming, Mathf.Clamp01(strength * paintDepositStrength));
+            deposited.a = 1f;
+            return deposited;
+        }
+
+        float coverage = 1f - Mathf.Clamp01((old.r + old.g + old.b) / 3f);
+        float overlapBoost = Mathf.Lerp(1.00f, 1.30f, coverage);
+        Color pigmentMixed = PigmentMixApprox(old, incoming);
+        // مزج السيلان على اللوحة المائلة يستعمل فكرة المشروع القديم نفسها،
+        // لكن مع حفظ أقل للون الساقط حتى يظهر الأخضر/البرتقالي/البنفسجي أثناء النزول.
+        Color target = Color.Lerp(pigmentMixed, incoming, 0.10f * paintDepositStrength);
+        float mixAmount = Mathf.Clamp01(strength * canvasMixStrength * overlapBoost + 0.16f);
+
+        bool oldIsConfidentGreen = old.g > 0.35f && old.r < 0.28f && old.b < 0.28f;
+        bool oldIsConfidentPurple = old.r > 0.22f && old.r < 0.42f && old.b > 0.38f && old.g < 0.15f;
+        bool oldIsConfidentOrange = old.r > 0.75f && old.g > 0.20f && old.g < 0.60f && old.b < 0.10f;
+        if (oldIsConfidentGreen || oldIsConfidentPurple || oldIsConfidentOrange)
+        {
+            pigmentMixed.a = 1f;
+            return pigmentMixed;
+        }
+
+        Color result = Color.Lerp(old, target, mixAmount);
+        result.a = 1f;
+        return result;
+    }
+
+    void FadeDripSource(ref Color dst, float amount)
+    {
+        dst = Color.Lerp(dst, CanvasBackgroundColor(), Mathf.Clamp01(amount));
+        dst.a = 1f;
+    }
+
+    void DepositDripPixel(Color[] buffer, int x, int y, Color col, float strength)
+    {
+        if (x < 0 || x >= canvasWidth || y < 0 || y >= canvasHeight) return;
+        int idx = y * canvasWidth + x;
+        BlendDripInto(ref buffer[idx], col, strength);
+    }
+
+    void DrawInitialGravityRun(int cx, int cy, int r, Color col, float impactSpeed)
+    {
+        if (!TryGetCanvasDownDirection(out Vector2 dir, out float tilt01)) return;
+
+        float surfaceMob, absorb, sideSpread;
+        GetSurfaceDripResponse(out surfaceMob, out absorb, out sideSpread);
+
+        float viscosityMob = Mathf.Lerp(1.25f, 0.22f, Mathf.Clamp01(viscosity));
+        float mobility = dripStrength * GetPaintDripMobility() * surfaceMob * viscosityMob;
+        float response = tilt01 * mobility * Mathf.Clamp(0.55f + impactSpeed * 0.12f, 0.55f, 1.7f);
+        if (response < dripThreshold) return;
+
+        // الخشب يمدد اللون قليلاً مع العروق الأفقية، لكن يظل للجاذبية دور.
+        if (surfaceType == SurfaceType.Wood)
+            dir = Vector2.Lerp(dir, new Vector2(Mathf.Sign(dir.x == 0f ? 1f : dir.x), 0f), 0.35f).normalized;
+
+        int length = Mathf.Clamp(Mathf.RoundToInt(r * Mathf.Lerp(1.2f, 5.0f, response)), 1, 42);
+        int radius = Mathf.Max(1, Mathf.RoundToInt(r * Mathf.Lerp(0.38f, 0.12f, absorb)));
+        Color run = col;
+        run.a = paintDepositStrength * Mathf.Lerp(0.28f, 0.62f, 1f - absorb);
+
+        Vector2 perp = new Vector2(-dir.y, dir.x);
+        int sideRepeats = surfaceType == SurfaceType.Paper ? 2 : surfaceType == SurfaceType.Cloth ? 1 : 0;
+
+        for (int i = 1; i <= length; i++)
+        {
+            float t = (float)i / length;
+            int x = cx + Mathf.RoundToInt(dir.x * i);
+            int y = cy + Mathf.RoundToInt(dir.y * i);
+            Color stepCol = run;
+            stepCol.a *= (1f - t) * Mathf.Lerp(0.35f, 1f, response);
+            FillCircleSoft(x, y, Mathf.Max(1, Mathf.RoundToInt(radius * (1f - t * 0.65f))), stepCol, Mathf.Lerp(0.85f, 0.25f, 1f - absorb));
+
+            // الورق والقماش ينتشران قليلاً جانبياً بدل خط مستقيم تماماً.
+            for (int s = 1; s <= sideRepeats; s++)
+            {
+                int off = Mathf.RoundToInt(s * sideSpread * r);
+                if (off <= 0) continue;
+                Color side = stepCol; side.a *= 0.35f;
+                FillCircleSoft(x + Mathf.RoundToInt(perp.x * off), y + Mathf.RoundToInt(perp.y * off), 1, side, 0.9f);
+                FillCircleSoft(x - Mathf.RoundToInt(perp.x * off), y - Mathf.RoundToInt(perp.y * off), 1, side, 0.9f);
+            }
+        }
+    }
+
+    void ApplyCanvasPaintDrips()
+    {
+        lastDripFrame = frameCount;
+        if (canvasPx == null || canvasPx.Length == 0 || canvasWidth <= 0 || canvasHeight <= 0) return;
+        if (!TryGetCanvasDownDirection(out Vector2 dir, out float tilt01)) return;
+
+        if (dripScratch == null || dripScratch.Length != canvasPx.Length)
+            dripScratch = new Color[canvasPx.Length];
+
+        System.Array.Copy(canvasPx, dripScratch, canvasPx.Length);
+
+        float surfaceMob, absorb, sideSpread;
+        GetSurfaceDripResponse(out surfaceMob, out absorb, out sideSpread);
+        float viscosityMob = Mathf.Lerp(1.25f, 0.22f, Mathf.Clamp01(viscosity));
+        float mobility = dripStrength * GetPaintDripMobility() * surfaceMob * viscosityMob;
+        float baseFlow = tilt01 * mobility;
+        if (baseFlow < dripThreshold * 0.35f) return;
+
+        Vector2 perp = new Vector2(-dir.y, dir.x);
+        bool changed = false;
+
+        for (int y = 0; y < canvasHeight; y++)
+        {
+            for (int x = 0; x < canvasWidth; x++)
+            {
+                int idx = y * canvasWidth + x;
+                Color src = canvasPx[idx];
+                float amount = PixelPaintAmount(src);
+                if (amount < dripThreshold) continue;
+
+                float flow = amount * baseFlow;
+                if (flow < dripThreshold) continue;
+
+                int step = Mathf.Clamp(Mathf.RoundToInt(flow * maxDripPixelsPerStep), 1, Mathf.Max(1, maxDripPixelsPerStep));
+                int tx = x + Mathf.RoundToInt(dir.x * step);
+                int ty = y + Mathf.RoundToInt(dir.y * step);
+
+                float transfer = Mathf.Clamp(flow * 0.16f, 0.012f, 0.18f);
+                float sourceFade = transfer * Mathf.Lerp(0.22f, 1.10f, absorb) * Mathf.Lerp(0.25f, 1f, dripDrying);
+
+                // إذا الدهان وصل خارج اللوحة، ينزل من الحافة ويخف المصدر.
+                if (tx < 0 || tx >= canvasWidth || ty < 0 || ty >= canvasHeight)
+                {
+                    FadeDripSource(ref dripScratch[idx], sourceFade * 1.25f);
+                    changed = true;
+                    continue;
+                }
+
+                FadeDripSource(ref dripScratch[idx], sourceFade);
+                DepositDripPixel(dripScratch, tx, ty, src, transfer);
+
+                // انتشار جانبي خفيف حسب السطح: ورق/قماش أكثر، معدن أقل.
+                float side = transfer * sideSpread * 0.45f;
+                if (side > 0.006f)
+                {
+                    int sx = Mathf.RoundToInt(perp.x);
+                    int sy = Mathf.RoundToInt(perp.y);
+                    DepositDripPixel(dripScratch, tx + sx, ty + sy, src, side);
+                    DepositDripPixel(dripScratch, tx - sx, ty - sy, src, side);
+                }
+
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            Color[] tmp = canvasPx;
+            canvasPx = dripScratch;
+            dripScratch = tmp;
+            canvasDirty = true;
+        }
     }
 
     // استجابة خفيفة لكل نوع سطح: انتشار، نعومة الحافة، كمية اللون
@@ -1478,10 +1799,8 @@ public class PBFSolver : MonoBehaviour
             DrawLineOnCanvas(lastTrailPoint, pointWorld, r, CurrentPaintColor());
         else
         {
-            Vector3 lp = canvasTransform.InverseTransformPoint(pointWorld);
-            int px = Mathf.RoundToInt(Mathf.Clamp01((lp.x + canvasHalfX) / (canvasHalfX * 2f)) * canvasWidth);
-            int py = Mathf.RoundToInt(Mathf.Clamp01((lp.z + canvasHalfZ) / (canvasHalfZ * 2f)) * canvasHeight);
-            FillCircle(px, py, r, CurrentPaintColor());
+            if (WorldToCanvasPixel(pointWorld, out int px, out int py, true))
+                FillCircle(px, py, r, CurrentPaintColor());
         }
 
         lastTrailPoint = pointWorld;
@@ -1499,6 +1818,11 @@ public class PBFSolver : MonoBehaviour
         // مؤقّت زمن الحركة + اختصار الحفظ
         if (pendulum != null && pendulum.IsRunning) motionElapsed += Time.deltaTime;
         if (Input.GetKeyDown(KeyCode.F9)) SaveExperiment();
+
+        ApplyCanvasTiltTransform();
+
+        if (enablePaintDripping && canvasPx != null && frameCount - lastDripFrame >= Mathf.Max(1, dripEveryNFrames))
+            ApplyCanvasPaintDrips();
 
         // if (visualDirty) { UpdateVisualPS(); visualDirty = false; }   // ← off: GPU instanced renderer now handles visuals
         if (canvasDirty && frameCount - lastCanvasApplyFrame >= Mathf.Max(1, canvasApplyEveryNFrames))
@@ -1556,12 +1880,9 @@ public class PBFSolver : MonoBehaviour
 
     void DrawLineOnCanvas(Vector3 fromW, Vector3 toW, int radius, Color c)
     {
-        Vector3 lpA = canvasTransform.InverseTransformPoint(fromW);
-        Vector3 lpB = canvasTransform.InverseTransformPoint(toW);
-        int ax = Mathf.RoundToInt(Mathf.Clamp01((lpA.x + canvasHalfX) / (canvasHalfX * 2f)) * canvasWidth);
-        int ay = Mathf.RoundToInt(Mathf.Clamp01((lpA.z + canvasHalfZ) / (canvasHalfZ * 2f)) * canvasHeight);
-        int bx = Mathf.RoundToInt(Mathf.Clamp01((lpB.x + canvasHalfX) / (canvasHalfX * 2f)) * canvasWidth);
-        int by = Mathf.RoundToInt(Mathf.Clamp01((lpB.z + canvasHalfZ) / (canvasHalfZ * 2f)) * canvasHeight);
+        if (!WorldToCanvasPixel(fromW, out int ax, out int ay, true)) return;
+        if (!WorldToCanvasPixel(toW, out int bx, out int by, true)) return;
+
         int steps = Mathf.Min(Mathf.Max(Mathf.Abs(bx - ax), Mathf.Abs(by - ay), 1), 300);
         for (int s = 0; s <= steps; s++)
         {
@@ -1572,6 +1893,43 @@ public class PBFSolver : MonoBehaviour
         canvasDirty = true;
     }
 
+    float CanvasPlaneCoord(Vector3 localPoint)
+        => canvasIsHorizontal ? localPoint.y : localPoint.z;
+
+    float CanvasVCoord(Vector3 localPoint)
+        => canvasIsHorizontal ? localPoint.z : localPoint.y;
+
+    bool IsLocalPointOnCanvas(Vector3 localPoint)
+    {
+        float u = localPoint.x;
+        float v = CanvasVCoord(localPoint);
+        return Mathf.Abs(u) <= canvasHalfX && Mathf.Abs(v) <= canvasHalfZ;
+    }
+
+    bool WorldToCanvasPixel(Vector3 worldPos, out int px, out int py, bool clampToCanvas)
+    {
+        px = 0;
+        py = 0;
+        if (canvasTransform == null) return false;
+
+        Vector3 lp = canvasTransform.InverseTransformPoint(worldPos);
+        float u = lp.x;
+        float v = CanvasVCoord(lp);
+
+        if (!clampToCanvas && (Mathf.Abs(u) > canvasHalfX || Mathf.Abs(v) > canvasHalfZ))
+            return false;
+
+        float nx = Mathf.Clamp01((u + canvasHalfX) / Mathf.Max(canvasHalfX * 2f, 0.0001f));
+        float ny = Mathf.Clamp01((v + canvasHalfZ) / Mathf.Max(canvasHalfZ * 2f, 0.0001f));
+
+        px = Mathf.RoundToInt(nx * (canvasWidth - 1));
+        py = Mathf.RoundToInt(ny * (canvasHeight - 1));
+
+        if (flipMarkU) px = canvasWidth - 1 - px;
+        if (flipMarkV) py = canvasHeight - 1 - py;
+        return true;
+    }
+
     public Vector3 ProjectOntoCanvas(Vector3 worldPos)
     {
         Vector3 lp = canvasTransform.InverseTransformPoint(worldPos);
@@ -1579,10 +1937,63 @@ public class PBFSolver : MonoBehaviour
         return canvasTransform.TransformPoint(lp);
     }
 
+    bool TryGetCanvasImpactPoint(Vector3 currentWorld, Vector3 worldVel, out Vector3 hitWorld, out bool hitInsideCanvas)
+    {
+        hitWorld = currentWorld;
+        hitInsideCanvas = false;
+        if (canvasTransform == null) return false;
+
+        Vector3 curLocal = canvasTransform.InverseTransformPoint(currentWorld);
+        float curPlane = CanvasPlaneCoord(curLocal);
+
+        // إذا لم نرد التقاطع بالمسار، نعود لسلوك الإسقاط، لكن مع محاور صحيحة.
+        if (!useTrajectoryCanvasProjection || worldVel.sqrMagnitude < 0.000001f)
+        {
+            if (Mathf.Abs(curPlane) > canvasImpactTolerance && curPlane > 0f) return false;
+            Vector3 projected = curLocal;
+            if (canvasIsHorizontal) projected.y = 0f; else projected.z = 0f;
+            hitWorld = canvasTransform.TransformPoint(projected);
+            hitInsideCanvas = IsLocalPointOnCanvas(projected);
+            return true;
+        }
+
+        // نرجع تقريبياً لموقع الجزيئة قبل آخر readback، ونحسب تقاطع القطعة مع مستوى اللوحة.
+        float backDt = Time.fixedDeltaTime * Mathf.Max(1, readbackInterval) * impactBacktrackMultiplier;
+        Vector3 prevWorld = currentWorld - worldVel * backDt;
+        Vector3 prevLocal = canvasTransform.InverseTransformPoint(prevWorld);
+        float prevPlane = CanvasPlaneCoord(prevLocal);
+
+        bool crossedPlane = (prevPlane > 0f && curPlane <= canvasImpactTolerance) ||
+                            (prevPlane < 0f && curPlane >= -canvasImpactTolerance) ||
+                            (prevPlane * curPlane <= 0f);
+
+        bool closeOrAlreadyPassed = Mathf.Abs(curPlane) <= canvasImpactTolerance || curPlane < 0f;
+        if (!crossedPlane && !closeOrAlreadyPassed)
+            return false;
+
+        Vector3 hitLocal;
+        float denom = prevPlane - curPlane;
+        if (Mathf.Abs(denom) > 0.00001f)
+        {
+            float t = Mathf.Clamp01(prevPlane / denom);
+            hitLocal = Vector3.Lerp(prevLocal, curLocal, t);
+        }
+        else
+        {
+            hitLocal = curLocal;
+        }
+
+        if (canvasIsHorizontal) hitLocal.y = 0f; else hitLocal.z = 0f;
+
+        hitWorld = canvasTransform.TransformPoint(hitLocal);
+        hitInsideCanvas = IsLocalPointOnCanvas(hitLocal);
+        return true;
+    }
+
     public bool IsPointOnCanvas(Vector3 worldPos)
     {
         Vector3 lp = canvasTransform.InverseTransformPoint(worldPos);
-        return Mathf.Abs(lp.x) <= canvasHalfX && Mathf.Abs(lp.z) <= canvasHalfZ;
+        return IsLocalPointOnCanvas(lp);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -1637,7 +2048,7 @@ public class PBFSolver : MonoBehaviour
 
     public void ClearCanvas()
     {
-        var bg = new Color(0.95f, 0.92f, 0.85f, 1f);
+        var bg = CanvasBackgroundColor();
         for (int i = 0; i < canvasPx.Length; i++) canvasPx[i] = bg;
         canvasTex.SetPixels(canvasPx);
         canvasTex.Apply();
@@ -1646,6 +2057,7 @@ public class PBFSolver : MonoBehaviour
         motionElapsed = 0f;
         releasedPaintParticles = 0;
         lastCanvasApplyFrame = frameCount;
+        lastDripFrame = frameCount;
     }
 
     public void SaveCanvas(string path = "PaintResult.png")
@@ -1654,7 +2066,7 @@ public class PBFSolver : MonoBehaviour
     // مساحة انتشار اللون (m²) + النسبة المئوية من اللوحة
     public float CoverageArea(out float percent)
     {
-        var bg = new Color(0.95f, 0.92f, 0.85f, 1f);
+        var bg = CanvasBackgroundColor();
         int painted = 0;
         for (int i = 0; i < canvasPx.Length; i++)
         {
@@ -1665,8 +2077,10 @@ public class PBFSolver : MonoBehaviour
         percent = 100f * painted / canvasPx.Length;
 
         float sx = canvasTransform ? Mathf.Abs(canvasTransform.lossyScale.x) : 1f;
-        float sz = canvasTransform ? Mathf.Abs(canvasTransform.lossyScale.z) : 1f;
-        float pixelArea = (2f * canvasHalfX * sx / canvasWidth) * (2f * canvasHalfZ * sz / canvasHeight);
+        float sv = canvasTransform
+            ? Mathf.Abs(canvasIsHorizontal ? canvasTransform.lossyScale.z : canvasTransform.lossyScale.y)
+            : 1f;
+        float pixelArea = (2f * canvasHalfX * sx / canvasWidth) * (2f * canvasHalfZ * sv / canvasHeight);
         return painted * pixelArea;
     }
 
@@ -1743,9 +2157,21 @@ public class PBFSolver : MonoBehaviour
         sb.AppendLine($"    Resolution          : {canvasWidth} x {canvasHeight} px");
         sb.AppendLine($"    Surface type        : {surfaceType}");
         float sx = canvasTransform ? Mathf.Abs(canvasTransform.lossyScale.x) : 1f;
-        float sz = canvasTransform ? Mathf.Abs(canvasTransform.lossyScale.z) : 1f;
-        sb.AppendLine($"    Physical size       : {2f * canvasHalfX * sx:F2} x {2f * canvasHalfZ * sz:F2} m");
+        float sv = canvasTransform
+            ? Mathf.Abs(canvasIsHorizontal ? canvasTransform.lossyScale.z : canvasTransform.lossyScale.y)
+            : 1f;
+        sb.AppendLine($"    Physical size       : {2f * canvasHalfX * sx:F2} x {2f * canvasHalfZ * sv:F2} m");
+        if (canvasTransform != null)
+        {
+            Vector3 cLocal = canvasTransform.localPosition;
+            Vector3 cWorld = canvasTransform.position;
+            sb.AppendLine($"    Local position      : X={cLocal.x:F2}, Y={cLocal.y:F2}, Z={cLocal.z:F2}");
+            sb.AppendLine($"    World position      : X={cWorld.x:F2}, Y={cWorld.y:F2}, Z={cWorld.z:F2}");
+        }
         sb.AppendLine($"    Orientation         : {(canvasIsHorizontal ? "Horizontal" : "Vertical")}");
+        sb.AppendLine($"    Tilt X / Z          : {canvasTiltXDeg:F1} deg / {canvasTiltZDeg:F1} deg");
+        sb.AppendLine($"    Dripping enabled    : {enablePaintDripping}");
+        sb.AppendLine($"    Drip strength       : {dripStrength:F2}");
         sb.AppendLine();
 
         sb.AppendLine("------------------------------------------------------------");
@@ -1794,6 +2220,7 @@ public class PBFSolver : MonoBehaviour
     {
         canvasTex = new Texture2D(canvasWidth, canvasHeight, TextureFormat.RGBA32, false);
         canvasPx = new Color[canvasWidth * canvasHeight];
+        dripScratch = new Color[canvasWidth * canvasHeight];
         ClearCanvas();
         if (canvasRenderer) canvasRenderer.material.mainTexture = canvasTex;
 

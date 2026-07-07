@@ -654,6 +654,7 @@ MonoBehaviour:
   trailMinThickness: 1
   trailMaxThickness: 4.6
   showLog: 1
+  logEveryFrames: 600
   holeOpen: 1
 --- !u!114 &967485741
 MonoBehaviour:
@@ -676,7 +677,7 @@ MonoBehaviour:
   surfaceType: 1
   enableSurfaceEffects: 1
   surfaceEffectStrength: 0.043
-  maxParticles: 10000
+  maxParticles: 50000
   h: 0.06
   autoComputeH: 1
   targetNeighborCount: 42

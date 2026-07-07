@@ -290,6 +290,8 @@ MonoBehaviour:
   bucketHole: {fileID: 967485740}
   toggleKey: 9
   visible: 1
+  enableSafeLayoutGuard: 1
+  bucketCanvasClearance: 0.45
 --- !u!4 &405365520
 Transform:
   m_ObjectHideFlags: 0
@@ -653,13 +655,8 @@ MonoBehaviour:
   enableTrail: 0
   trailMinThickness: 1
   trailMaxThickness: 4.6
-  enableConnectedPourVisual: 1
-  paintStream: {fileID: 0}
-  streamMinRadius: 0.01
-  streamMaxRadius: 0.026
-  streamExitSpeed: 1.15
-  streamBucketVelocityInfluence: 0.55
   showLog: 1
+  logEveryFrames: 600
   holeOpen: 1
 --- !u!114 &967485741
 MonoBehaviour:
@@ -702,6 +699,15 @@ MonoBehaviour:
   splashMaxRadius: 30
   readbackInterval: 4
   dropletSizeRatio: 0.3
+  enableCanvasTiltControls: 0
+  canvasTiltXDeg: 0
+  canvasTiltZDeg: 0
+  enablePaintDripping: 1
+  dripStrength: 0.75
+  dripEveryNFrames: 6
+  maxDripPixelsPerStep: 4
+  dripThreshold: 0.07
+  dripDrying: 0.18
   sprayEnabled: 1
   exactDotSize: 4
   flipMarkU: 1
@@ -762,7 +768,6 @@ MonoBehaviour:
   solver: {fileID: 967485741}
   material: {fileID: 2100000, guid: ff16b42a35384dc4cab212ad96f86f49, type: 2}
   particleScale: 0.08
-  fallingParticleScaleMultiplier: 0.16
 --- !u!1001 &1006875360
 PrefabInstance:
   m_ObjectHideFlags: 0
