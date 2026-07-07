@@ -676,7 +676,7 @@ MonoBehaviour:
   surfaceType: 1
   enableSurfaceEffects: 1
   surfaceEffectStrength: 0.043
-  maxParticles: 300000
+  maxParticles: 10000
   h: 0.06
   autoComputeH: 1
   targetNeighborCount: 42

@@ -51,8 +51,8 @@ public class PBFSolver : MonoBehaviour
 
     // ══════════════════════════════════════════════════════════════
     [Header("PBF Settings — إعدادات المحاكاة")]
-    [Tooltip("عدد الجزيئات — يمكن رفعه فوق 200K على كروت أقوى. غيّر الرقم ثم Restart Simulation.")]
-    [Min(1000)]
+    [Tooltip("عدد الجزيئات — RTX 2050 يدعم 50K-200K بسهولة")]
+    [Range(1000, 200000)]
     public int maxParticles = 40000;
 
     [Tooltip("نصف قطر التأثير بين الجزيئات")]

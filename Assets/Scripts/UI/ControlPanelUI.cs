@@ -343,7 +343,7 @@ public class ControlPanelUI : MonoBehaviour
             bucketHole.holeDiameter = GUILayout.HorizontalSlider(bucketHole.holeDiameter, 0.005f, 0.15f);
 
             GUILayout.Label($"Paint flow rate: {bucketHole.particlesPerSecond:F1} particles/s", sliderLabelStyle);
-            bucketHole.particlesPerSecond = GUILayout.HorizontalSlider(bucketHole.particlesPerSecond, 1f, 1000f);
+            bucketHole.particlesPerSecond = GUILayout.HorizontalSlider(bucketHole.particlesPerSecond, 1f, 100f);
         }
         else
         {
@@ -521,7 +521,7 @@ public class ControlPanelUI : MonoBehaviour
 
         GUILayout.Label($"Count: {solver.maxParticles:N0}", sliderLabelStyle);
         solver.maxParticles = Mathf.RoundToInt(
-            GUILayout.HorizontalSlider(solver.maxParticles, 1000, 1000000));
+            GUILayout.HorizontalSlider(solver.maxParticles, 1000, 200000));
 
         GUILayout.Space(4);
         if (GUILayout.Button("↻  Restart With New Count", buttonStyle))
