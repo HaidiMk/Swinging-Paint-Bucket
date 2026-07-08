@@ -107,7 +107,6 @@
                 float  ndl   = saturate(dot(nWS, L));
                 float3 shade = IN.color.rgb * (ndl * 0.7 + _AmbientBoost);
 
-               
                 float  spec = pow(saturate(dot(nWS, H)), _Glossiness) * _SpecStrength;
                 float3 lit  = shade + spec * IN.color.rgb * 0.5;
 
