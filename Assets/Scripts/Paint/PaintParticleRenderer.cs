@@ -1,13 +1,11 @@
 ﻿using UnityEngine;
 
-// Renders the PBF particles as GPU-instanced sphere-imposters.
-// Reads positions/states directly from the solver's ComputeBuffers,
-// so there is NO CPU readback and NO 50K ParticleSystem cap.
+
 public class PaintParticleRenderer : MonoBehaviour
 {
     [Header("References")]
     public PBFSolver solver;
-    public Material material;                       // uses Custom/PaintParticleInstancedURP
+    public Material material;                       
 
     [Header("Look")]
     [Range(0.005f, 0.08f)] public float particleScale = 0.018f;
@@ -20,7 +18,6 @@ public class PaintParticleRenderer : MonoBehaviour
     void Start()
     {
         quadMesh = BuildQuad();
-        // Big bounds so Unity never frustum-culls the whole batch
         bounds = new Bounds(Vector3.zero, Vector3.one * 1000f);
     }
 
@@ -32,11 +29,9 @@ public class PaintParticleRenderer : MonoBehaviour
         int count = solver.ParticleCount;
         if (count != cachedCount) { BuildArgs(count); cachedCount = count; }
 
-        // Bind GPU buffers (these stay on the GPU - no readback)
         material.SetBuffer("_Positions", solver.PositionsBuffer);
         material.SetBuffer("_States", solver.StatesBuffer);
 
-        // Per-frame params for size + depth colouring
         material.SetFloat("_Scale", particleScale);
         material.SetVector("_BucketCenter", solver.BucketCenter);
         material.SetVector("_BucketRight", solver.BucketRightDir);
@@ -56,8 +51,8 @@ public class PaintParticleRenderer : MonoBehaviour
     {
         argsBuffer?.Release();
         uint[] args = new uint[5] { 0, 0, 0, 0, 0 };
-        args[0] = quadMesh.GetIndexCount(0);   // indices per instance (6)
-        args[1] = (uint)count;                 // instance count
+        args[0] = quadMesh.GetIndexCount(0);   
+        args[1] = (uint)count;                
         args[2] = quadMesh.GetIndexStart(0);
         args[3] = quadMesh.GetBaseVertex(0);
         argsBuffer = new ComputeBuffer(1, args.Length * sizeof(uint),
@@ -65,7 +60,7 @@ public class PaintParticleRenderer : MonoBehaviour
         argsBuffer.SetData(args);
     }
 
-    // A 1x1 quad centered on the origin; the shader billboards + rounds it.
+
     Mesh BuildQuad()
     {
         Mesh m = new Mesh { name = "ParticleQuad" };

@@ -1,23 +1,6 @@
 ﻿using UnityEngine;
 
-// ════════════════════════════════════════════════════════════════════
-//  PBFSolverBox.cs — محاكاة سائل GPU مستقلة داخل متوازي مستطيلات شفّاف.
-//
-//  هي **نفس معالجة السائل** الموجودة بمشروع الدلو (نفس kernels الـ PBF:
-//  PredictPositions / Grid / FindNeighbors / SolveConstraints /
-//  ApplyCorrection / UpdateVelocity / ApplyViscosity)، لكن **معزولة**:
-//  بلا بندول، بلا لوحة، بلا فتحة — والحدود صندوق (EnforceBoundaryBox).
-//
-//  ⚠ ملف مستقل تمامًا — لا يلمس PBFSolver.cs الأصلي ولا يؤثّر على الدلو.
-//
-//  الإعداد (دقيقتين):
-//   1. مشهد جديد → GameObject فاضي → سمّيه "FluidBoxGPU".
-//   2. أضِف هذا السكربت.
-//   3. اسحب ملف الـ Compute "PBFSolverBox.compute" على خانة "Pbf Compute Shader".
-//   4. شغّل ▶ .
-//
-//  التحكّم:  Arrows/WASD تحريك | Q/E تدوير | R/F رفع-خفض | Space هزّة
-// ════════════════════════════════════════════════════════════════════
+
 public class PBFSolverBox : MonoBehaviour
 {
     [Header("Compute (اسحب PBFSolverBox.compute هنا)")]
@@ -25,14 +8,14 @@ public class PBFSolverBox : MonoBehaviour
 
     [Header("Fluid — نفس إعدادات حلّال الدلو")]
     public int maxParticles = 1500;
-    public float h = 0.08f;              // نصف قطر التأثير
+    public float h = 0.08f;             
     public float restDensity = 6f;
     public int solverIterations = 2;
     public float epsilon = 600f;
     public float viscosity = 0.10f;
     public float gravity = 9.81f;
     public float gravityScale = 0.6f;
-    public float bucketInfluence = 0.5f; // تأثير حركة الصندوق (التمايل)
+    public float bucketInfluence = 0.5f; 
 
     [Header("Sloshing — نفس متغيرات تمايل السائل بالدلو")]
     public bool enableParticleSloshing = true;
@@ -64,12 +47,11 @@ public class PBFSolverBox : MonoBehaviour
     public float particleRenderRadius = 0.045f;
     public float renderScale = 1.7f;
 
-    // ثوابت (نفس حلّال الدلو)
+
     const int MAX_PER_CELL = 128;
     const int MAX_NEIGHBORS = 64;
     const int INSIDE = 0;
 
-    // Buffers (نفس بنية الدلو)
     ComputeBuffer positionsBuffer, predictedPosBuffer, velocitiesBuffer, deltaPosBuffer;
     ComputeBuffer lambdasBuffer, statesBuffer, neighborListBuffer, neighborCountBuffer;
     ComputeBuffer gridCountBuffer, gridParticlesBuffer;
@@ -77,16 +59,13 @@ public class PBFSolverBox : MonoBehaviour
     int kPredict, kClearGrid, kFillGrid, kFindNeighbors, kSolve, kCorrect,
         kUpdateVel, kViscosity, kCohesion, kBoundaryBox, kClampPredicted;
 
-    // Grid
     int gridSizeX, gridSizeY, gridSizeZ, totalCells;
     Vector3 gridOrigin; float cellSize;
 
-    // حركة الصندوق (للتمايل)
     Vector3 prevPos, prevVel, boxAccel;
     Vector3 particleSloshVector = Vector3.zero;
     Vector3 particleSloshVelocity = Vector3.zero;
 
-    // عرض
     Vector3[] positionsCPU;
     Mesh sphereMesh; Material fluidMat; Matrix4x4[] matrices;
     bool ready;
@@ -106,7 +85,7 @@ public class PBFSolverBox : MonoBehaviour
         InitGrid();
         InitBuffers();
         SpawnParticles();
-        CalibrateRestDensity();   // يحسب restDensity الصحيح تلقائيًا (متل FluidBox.cs)
+        CalibrateRestDensity();  
         SetupRendering();
         if (autoCreateBoxVisual) CreateBoxVisual();
         prevPos = transform.position;
@@ -153,7 +132,7 @@ public class PBFSolverBox : MonoBehaviour
         kCorrect = pbfComputeShader.FindKernel("ApplyCorrection");
         kUpdateVel = pbfComputeShader.FindKernel("UpdateVelocity");
         kViscosity = pbfComputeShader.FindKernel("ApplyViscosity");
-        kCohesion = pbfComputeShader.FindKernel("ApplyCohesion"); // v2: buffers are bound for this kernel too
+        kCohesion = pbfComputeShader.FindKernel("ApplyCohesion"); 
         kBoundaryBox = pbfComputeShader.FindKernel("EnforceBoundaryBox");
         kClampPredicted = pbfComputeShader.FindKernel("ClampPredictedBox");
 
@@ -185,7 +164,7 @@ public class PBFSolverBox : MonoBehaviour
             float bx = Random.Range(-boxHalfExtents.x * 0.9f, boxHalfExtents.x * 0.9f);
             float bz = Random.Range(-boxHalfExtents.z * 0.9f, boxHalfExtents.z * 0.9f);
             float by = Random.Range(-boxHalfExtents.y * 0.9f, boxHalfExtents.y * 0.1f);
-            initPos[i] = new Vector3(bx, by, bz); // إحداثيات محلية مباشرة (بلا تحويل لعالمية)
+            initPos[i] = new Vector3(bx, by, bz); 
             initVel[i] = Vector3.zero;
             initSt[i] = INSIDE;
         }
@@ -195,9 +174,9 @@ public class PBFSolverBox : MonoBehaviour
         initPos.CopyTo(positionsCPU, 0);
     }
 
-    // ── يحسب restDensity الصحيح من التوزيع الفعلي للجزيئات وقيمة h الحالية ──
-    // نفس فكرة CalibrateRestDensity() بـ FluidBox.cs — بلا هيك، أي رقم يدوي
-    // لـ restDensity ممكن ما يطابق h المستخدم ويسبب دفع/جذب وهمي بين الجزيئات.
+
+
+
     void CalibrateRestDensity()
     {
         float poly6C = 315f / (64f * Mathf.PI * Mathf.Pow(h, 9));
@@ -225,18 +204,15 @@ public class PBFSolverBox : MonoBehaviour
 
         HandleMovement(dt);
 
-        // تسارع الصندوق من حركة الـ Transform → التمايل
         Vector3 vel = (transform.position - prevPos) / Mathf.Max(dt, 1e-4f);
         boxAccel = (vel - prevVel) / Mathf.Max(dt, 1e-4f);
         boxAccel = Vector3.ClampMagnitude(boxAccel, 8f);
         prevVel = vel; prevPos = transform.position;
 
-        // UpdateParticleSloshing(dt);   // معطّل مؤقتًا — نتأكد الأساس مطابق لـ FluidBox أول
         SetConstants(dt);
 
-        // نفس ترتيب حلّال الدلو (بدون falling/canvas فقط)
         Dispatch(kPredict);
-        Dispatch(kClampPredicted);   // قصّ فوري بعد التوقع، قبل بناء الـ grid (متل FluidBox.cs)
+        Dispatch(kClampPredicted);   
         DispatchGrid(kClearGrid);
         Dispatch(kFillGrid);
         Dispatch(kFindNeighbors);
@@ -248,7 +224,6 @@ public class PBFSolverBox : MonoBehaviour
         }
         Dispatch(kUpdateVel);
         if (viscosity > 0f) Dispatch(kViscosity);
-        // if (enableParticleCohesion && particleCohesionStrength > 0f) Dispatch(kCohesion);  // معطّل مؤقتًا
         Dispatch(kBoundaryBox);
     }
 
@@ -264,7 +239,6 @@ public class PBFSolverBox : MonoBehaviour
 
         Vector3 up = BoxUp;
 
-        // نفس فكرة الدلو: قوة وهمية من تسارع الحاوية + lag عكس سرعة الحاوية
         Vector3 lateralPseudo = Vector3.ProjectOnPlane(-boxAccel, up);
         Vector3 lateralVel = Vector3.ProjectOnPlane(prevVel, up);
 
@@ -294,8 +268,7 @@ public class PBFSolverBox : MonoBehaviour
     {
         var cs = pbfComputeShader;
 
-        // حوّل الجاذبية وتسارع الصندوق (تأثيراتهن الخارجية) لإحداثيات محلية
-        // بالنسبة للصندوق — متل ما بيعمل FluidBox.cs بالضبط.
+    
         Vector3 gravityWorld = new Vector3(0f, -gravity * gravityScale, 0f);
         Vector3 gravityLocal = transform.InverseTransformDirection(gravityWorld);
         Vector3 bucketAccelLocal = transform.InverseTransformDirection(boxAccel);
@@ -310,7 +283,6 @@ public class PBFSolverBox : MonoBehaviour
         cs.SetVector("gravityLocal", gravityLocal);
         cs.SetVector("bucketAccelLocal", bucketAccelLocal);
 
-        // نفس متغيرات sloshing/cohesion الموجودة بحلّال الدلو
         cs.SetInt("enableParticleSloshing", enableParticleSloshing ? 1 : 0);
         cs.SetVector("particleSloshVector", particleSloshVector);
         cs.SetFloat("particleSloshForce", particleSloshForce);
@@ -328,11 +300,9 @@ public class PBFSolverBox : MonoBehaviour
         cs.SetInt("maxNeighbors", MAX_NEIGHBORS);
         cs.SetInt("maxPerCell", MAX_PER_CELL);
 
-        // الصندوق هلق دايمًا مركزه (0,0,0) بالإحداثيات المحلية — بلا دوران يأثّر
         cs.SetVector("bucketCenter", Vector3.zero);
         cs.SetVector("bucketUp", Vector3.up);
         cs.SetVector("boxHalfExtents", boxHalfExtents);
-        // قيم الدلو غير مستخدمة بوضع الصندوق لكن نضبطها بأمان (كود sloshing القديم لسا موجود بس معطّل)
         cs.SetFloat("bucketRadius", boxHalfExtents.x);
         cs.SetFloat("bucketTop", boxHalfExtents.y);
         cs.SetFloat("bucketBottom", -boxHalfExtents.y);
@@ -340,7 +310,7 @@ public class PBFSolverBox : MonoBehaviour
         cs.SetInt("gridSizeX", gridSizeX);
         cs.SetInt("gridSizeY", gridSizeY);
         cs.SetInt("gridSizeZ", gridSizeZ);
-        cs.SetVector("gridOrigin", gridOrigin); // ثابت بالمحلي — ما بيتحرك مع الصندوق
+        cs.SetVector("gridOrigin", gridOrigin); 
         cs.SetFloat("cellSize", cellSize);
     }
 
@@ -388,7 +358,7 @@ public class PBFSolverBox : MonoBehaviour
     void RenderParticles()
     {
         if (sphereMesh == null || fluidMat == null) return;
-        positionsBuffer.GetData(positionsCPU);           // GPU → CPU للعرض (إحداثيات محلية)
+        positionsBuffer.GetData(positionsCPU);          
         float s = particleRenderRadius * 2f * renderScale;
         Vector3 scale = new Vector3(s, s, s);
         int drawn = 0;
@@ -397,7 +367,7 @@ public class PBFSolverBox : MonoBehaviour
             int batch = Mathf.Min(1023, maxParticles - drawn);
             for (int k = 0; k < batch; k++)
             {
-                Vector3 world = transform.TransformPoint(positionsCPU[drawn + k]); // محلي → عالمي
+                Vector3 world = transform.TransformPoint(positionsCPU[drawn + k]); 
                 matrices[k] = Matrix4x4.TRS(world, Quaternion.identity, scale);
             }
             Graphics.DrawMeshInstanced(sphereMesh, 0, fluidMat, matrices, batch);

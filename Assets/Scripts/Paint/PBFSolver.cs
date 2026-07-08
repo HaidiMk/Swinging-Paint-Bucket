@@ -2,35 +2,17 @@
 using System.Runtime.InteropServices;
 using System.Collections.Generic;
 
-// ════════════════════════════════════════════════════════════════════
-//  PBFSolver.cs  v1.0
-//  Position Based Fluids — GPU Solver
-//
-//  هاد السكربت يدير الـ Compute Shader على GPU.
-//  يحل محل PaintSimulation.cs القديم بالكامل.
-//
-//  المعمارية:
-//  CPU  → يعطي الـ GPU البيانات (Buffers)
-//  GPU  → يحسب كل شي (Compute Kernels)
-//  CPU  → يقرأ النتائج فقط عند الحاجة (Canvas Impact)
-//
-//  لماذا PBF وليس SPH؟
-//  SPH  : يحسب القوى ثم يكمّل (Explicit) → قد ينفجر عددياً
-//  PBF  : يحل الـ constraints مباشرة (Implicit) → مستقر دائماً
-//         مناسب لأعداد كبيرة (100K-500K) بدون تعديل
-// ════════════════════════════════════════════════════════════════════
+
 
 public class PBFSolver : MonoBehaviour
 {
-    // ══════════════════════════════════════════════════════════════
     [Header("References — المراجع")]
     public SphericalPendulum pendulum;
     public Transform bucketTransform;
     public Transform canvasTransform;
     public Renderer canvasRenderer;
-    public ComputeShader pbfComputeShader;   // PBFSolver.compute
+    public ComputeShader pbfComputeShader;   
 
-    // ══════════════════════════════════════════════════════════════
     [Header("Paint Type — نوع الطلاء")]
     public PaintType paintType = PaintType.Acrylic;
 
@@ -41,7 +23,7 @@ public class PBFSolver : MonoBehaviour
     [Tooltip("نوع سطح الرسم: يغيّر شكل البقعة والانتشار والمزج")]
     public SurfaceType surfaceType = SurfaceType.Cloth;
     public enum SurfaceType
-    { Paper, Cloth, Wood, Metal }   // ورق، قماش، خشب، معدن
+    { Paper, Cloth, Wood, Metal }  
 
     [Tooltip("تفعيل تأثير السطح بصرياً على أثر الطلاء، بدون فيزياء جاهزة")]
     public bool enableSurfaceEffects = true;
@@ -49,7 +31,6 @@ public class PBFSolver : MonoBehaviour
     [Tooltip("قوة ظهور فرق السطح على اللوحة")]
     [Range(0f, 1f)] public float surfaceEffectStrength = 1.0f;
 
-    // ══════════════════════════════════════════════════════════════
     [Header("PBF Settings — إعدادات المحاكاة")]
     [Tooltip("عدد الجزيئات — RTX 2050 يدعم 50K-200K بسهولة")]
     [Range(1000, 200000)]
@@ -77,13 +58,11 @@ public class PBFSolver : MonoBehaviour
 
     public float G = 9.81f;
 
-    // ══════════════════════════════════════════════════════════════
     [Header("Bucket Size — حجم الدلو")]
     public float bucketWorldRadius = 0.25f;
     public float bucketWorldHeight = 0.4f;
     public Vector3 bucketCenterOffset = new Vector3(0f, 0f, -0.15f);
 
-    // ══════════════════════════════════════════════════════════════
     [Header("Canvas — اللوحة")]
     public int canvasWidth = 384;
     public int canvasHeight = 384;
@@ -92,7 +71,7 @@ public class PBFSolver : MonoBehaviour
     [Range(0.1f, 2f)] public float speedToSizeMultiplier = 0.3f;
     [Range(0, 20)] public int splashDroplets = 0;
     [Range(5, 80)] public int splashMaxRadius = 8;
-    [Range(1, 20)] public int readbackInterval = 6; // أخف: نكشف الاصطدام كل عدة frames
+    [Range(1, 20)] public int readbackInterval = 6; 
     [Range(0.1f, 0.8f)] public float dropletSizeRatio = 0.3f;
 
     [Header("Canvas Projection — إسقاط الدهان على اللوحة")]
@@ -140,12 +119,11 @@ public class PBFSolver : MonoBehaviour
     public bool invertCanvasDripV = true;
 
     [Header("Impact mark — أثر السقوط")]
-    public bool sprayEnabled = false;         // افتراضياً مطفأ للأداء والواقعية
-    [Range(1, 12)] public int exactDotSize = 3; // حجم نقطة محل السقوط
-    public bool flipMarkU = false;            // إذا الأثر معكوس أفقيًا عن الجزيئة
-    public bool flipMarkV = false;            // إذا الأثر معكوس عموديًا عن الجزيئة
+    public bool sprayEnabled = false;        
+    [Range(1, 12)] public int exactDotSize = 3; 
+    public bool flipMarkU = false;        
+    public bool flipMarkV = false;            
 
-    // ══════════════════════════════════════════════════════════════
     [Header("Visual — بصري")]
     public Color paintColor = new Color(0.9f, 0.1f, 0.1f, 1f);
     public Color paintColorDark = new Color(0.5f, 0.05f, 0.05f, 1f);
@@ -226,13 +204,11 @@ public class PBFSolver : MonoBehaviour
     [Header("Debug")]
     public bool showDebugGizmos = true;
 
-    // ══════════════════════════════════════════════════════════════
-    //  Paint Parameters
-    // ══════════════════════════════════════════════════════════════
+
     [HideInInspector] public float gravityScale = 0.6f;
     [HideInInspector] public float bucketInfluence = 0.3f;
     [HideInInspector] public float SIGMA = 0.3f;
-    [HideInInspector] public float viscosity = 0.42f; // تُضبط حسب نوع الدهان
+    [HideInInspector] public float viscosity = 0.42f; 
 
     [Header("Particle Cohesion — تماسك الجزيئات")]
     [Tooltip("يجعل الجزيئات القريبة تنجذب لبعضها بشكل خفيف حتى يظهر الطلاء ككتلة سائلة لا كحبيبات منفصلة.")]
@@ -250,9 +226,7 @@ public class PBFSolver : MonoBehaviour
     [Tooltip("تخميد إضافي بسيط يمنع اهتزاز كتلة السائل بعد إضافة التماسك.")]
     [Range(0f, 4f)] public float particleCohesionDamping = 1.35f;
 
-    // ══════════════════════════════════════════════════════════════
-    //  GPU Buffers — كل البيانات على كرت الشاشة
-    // ══════════════════════════════════════════════════════════════
+
     ComputeBuffer positionsBuffer;
     ComputeBuffer predictedPosBuffer;
     ComputeBuffer velocitiesBuffer;
@@ -264,9 +238,7 @@ public class PBFSolver : MonoBehaviour
     ComputeBuffer gridCountBuffer;
     ComputeBuffer gridParticlesBuffer;
 
-    // ══════════════════════════════════════════════════════════════
-    //  Kernel IDs — أرقام الـ kernels في الـ Compute Shader
-    // ══════════════════════════════════════════════════════════════
+  
     int kPredictPositions;
     int kClearGrid;
     int kFillGrid;
@@ -281,70 +253,60 @@ public class PBFSolver : MonoBehaviour
     int kClampPredicted;
     int kDampInsideFluid;
 
-    // ══════════════════════════════════════════════════════════════
-    //  Grid
-    // ══════════════════════════════════════════════════════════════
     int gridSizeX, gridSizeY, gridSizeZ;
     Vector3 gridOrigin;
     float cellSize;
-    const int MAX_PER_CELL = 128;   // مهم جداً فوق 15K: يمنع overflow داخل خلايا الـ grid
-    const int MAX_NEIGHBORS = 128;  // فوق 15K الجزيئة قد ترى أكثر من 64 جار
+    const int MAX_PER_CELL = 128;   
+    const int MAX_NEIGHBORS = 128; 
     int totalCells;
 
-    // ══════════════════════════════════════════════════════════════
-    //  CPU-side data — cached copy تتحدث كل 5 frames
-    // ══════════════════════════════════════════════════════════════
+
     Vector3[] positionsCPU;
     int[] statesCPU;
     Vector3[] velocitiesCPU;
     int[] colorLayerCPU;
 
-    // Single-element upload arrays: بدل رفع كل المصفوفة للـ GPU عند كل قطرة
+   
     readonly int[] oneIntUpload = new int[1];
     readonly Vector3[] oneVectorUpload = new Vector3[1];
 
-    // Cached values — للـ BucketHole بدون GetData كل frame
+ 
     int cachedInsideCount = 0;
     float cachedLiquidHeight = 0.5f;
     bool cpuDataReady = false;
 
-    // حالات الجزيء
+  
     const int INSIDE = 0;
     const int FALLING = 1;
     const int ON_CANVAS = 2;
 
-    // Canvas
+   
     Texture2D canvasTex;
     Color[] canvasPx;
     Color[] dripScratch;
     int lastDripFrame = 0;
     bool canvasDirty;
-    public string saveFolder = @"C:\Users\Haidi\VR_Project"; // مسار حفظ الصورة والتقرير
-    int paintedSplats = 0;     // عدد المسارات (بقع نزلت ع اللوحة)
-    float motionElapsed = 0f;  // زمن الحركة
+    public string saveFolder = @"C:\Users\Haidi\VR_Project"; 
+    int paintedSplats = 0;    
+    float motionElapsed = 0f;  
 
-    // ── للوحة التحكم: قراءة إحصائيات التجربة الحية ────────────────
     public int PaintedSplats => paintedSplats;
     public float MotionElapsed => motionElapsed;
     float canvasHalfX = 0.5f;
     float canvasHalfZ = 0.5f;
 
-    // Trail
     Vector3 lastTrailPoint;
     bool hasLastTrailPoint = false;
 
-    // Dynamics
     Vector3 prevBucketVel = Vector3.zero;
     Vector3 prevBucketCenter = Vector3.zero;
     bool bucketMotionInitialized = false;
     Vector3 bucketAccelWorld = Vector3.zero;
     float bucketMotionAmount = 0f;
 
-    // Particle sloshing state: اتجاه وكمية ميلان الجزيئات داخل الدلو
     Vector3 particleSloshVector = Vector3.zero;
     Vector3 particleSloshVelocity = Vector3.zero;
 
-    // Visual PS
     ParticleSystem visualPS;
     ParticleSystem.Particle[] visualParticles;
     bool visualDirty = true;
@@ -354,9 +316,6 @@ public class PBFSolver : MonoBehaviour
     int releasedPaintParticles = 0;
     int lastCanvasApplyFrame = 0;
 
-    // ══════════════════════════════════════════════════════════════
-    //  Bucket Helpers
-    // ══════════════════════════════════════════════════════════════
     public Vector3 BucketCenter => bucketTransform.position
                                  + bucketTransform.TransformDirection(bucketCenterOffset);
     Vector3 BucketUp => bucketTransform.TransformDirection(-Vector3.forward).normalized;
@@ -366,7 +325,6 @@ public class PBFSolver : MonoBehaviour
     public Vector3 HolePosition => BucketCenter - BucketUp * (bucketWorldHeight * 0.5f);
     public Vector3 TopPosition => BucketCenter + BucketUp * (bucketWorldHeight * 0.5f);
 
-    // ── Accessors for the GPU instanced renderer ──
     public ComputeBuffer PositionsBuffer => positionsBuffer;
     public ComputeBuffer StatesBuffer => statesBuffer;
     public int ParticleCount => maxParticles;
@@ -374,9 +332,7 @@ public class PBFSolver : MonoBehaviour
     public Vector3 BucketRightDir => BucketRight;
     public Vector3 BucketForwardDir => BucketForward;
 
-    // داخل الدلو نخزن الجزيئات بإحداثيات محلية خاصة بالسائل:
-    // x = يمين الدلو، y = محور الدلو/ارتفاع السائل، z = أمام الدلو.
-    // أما FALLING فهي world-space حتى تصطدم باللوحة بشكل طبيعي.
+  
     public Vector3 BucketFluidLocalToWorld(Vector3 local)
     {
         return BucketCenter + BucketRight * local.x + BucketUp * local.y + BucketForward * local.z;
@@ -398,16 +354,13 @@ public class PBFSolver : MonoBehaviour
         return new Vector3(Vector3.Dot(worldDir, BucketRight), Vector3.Dot(worldDir, BucketUp), Vector3.Dot(worldDir, BucketForward));
     }
 
-    // ════════════════════════════════════════════════════════════════
-    // بيحسب h تلقائيًا حتى عدد الجيران المتوقع لكل جزيء يضل قريب من targetNeighborCount
-    // مهما تغيّر عدد الجزيئات (maxParticles) — بدل ما نحسبها يدوي كل مرة.
-    // القانون: عدد الجيران ≈ (N/V) × (4/3 × π × h³)  →  نعكسها لنحل h
+    
     void AutoComputeH()
     {
         if (!autoComputeH) return;
 
-        float rMax = bucketWorldRadius * 0.9f;      // نفس نطاق نصف القطر بـ SpawnParticles
-        float heightSpan = bucketWorldHeight * 0.6f; // نفس نطاق الارتفاع بـ SpawnParticles (0.45+0.15)
+        float rMax = bucketWorldRadius * 0.9f;     
+        float heightSpan = bucketWorldHeight * 0.6f;
         float volume = Mathf.PI * rMax * rMax * heightSpan;
         float density = maxParticles / Mathf.Max(volume, 0.0001f);
 
@@ -418,10 +371,7 @@ public class PBFSolver : MonoBehaviour
             Debug.Log($"[PBFSolver] h تلقائي = {h:F4} (جيران مستهدفة={targetNeighborCount}, كثافة={density:F0} جزيء/م3)");
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  RestartSimulation — إعادة تشغيل كاملة (لازمة لما نغيّر عدد الجزيئات
-    //  أو أي إعداد بيأثر على حجم الـ Buffers). تُستدعى من لوحة التحكم.
-    // ════════════════════════════════════════════════════════════════
+ 
     public void RestartSimulation()
     {
         ReleaseBuffers();
@@ -446,14 +396,14 @@ public class PBFSolver : MonoBehaviour
             return;
         }
 
-        AutoComputeH();   // لازم قبل InitGrid لأنو الشبكة بتعتمد على h
+        AutoComputeH();  
         ApplyPaintType();
         InitGrid();
         InitGPUBuffers();
         InitCanvas();
-        // InitVisualPS();   // ← off: replaced by GPU instanced renderer (PaintParticleRenderer)
+        // InitVisualPS();  
         SpawnParticles();
-        CalibrateRestDensityScale();   // يصحّح restDensity حسب h والكثافة الفعلية (يحافظ على نسب أنواع الطلاء)
+        CalibrateRestDensityScale();   
         ResetBucketMotionTracking();
 
         initialized = true;
@@ -473,10 +423,8 @@ public class PBFSolver : MonoBehaviour
         particleSloshVelocity = Vector3.zero;
     }
 
-    // ════════════════════════════════════════════════════════════════
     void OnDestroy()
     {
-        // لازم تحرر GPU Buffers — بتسبب memory leak إذا ما تحررت
         ReleaseBuffers();
     }
 
@@ -494,9 +442,7 @@ public class PBFSolver : MonoBehaviour
         gridParticlesBuffer?.Release();
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  InitGrid — حجم الشبكة المكانية
-    // ════════════════════════════════════════════════════════════════
+
     void InitGrid()
     {
         cellSize = h;
@@ -519,15 +465,12 @@ public class PBFSolver : MonoBehaviour
             Debug.Log($"[PBF] Grid: {gridSizeX}x{gridSizeY}x{gridSizeZ} = {totalCells} cells");
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  InitGPUBuffers — يحجز الذاكرة على GPU
-    // ════════════════════════════════════════════════════════════════
+
     void InitGPUBuffers()
     {
         int n = maxParticles;
 
-        // كل Buffer = array على GPU
-        // sizeof(float3) = 12 bytes ، sizeof(float) = 4 bytes
+
         positionsBuffer = new ComputeBuffer(n, sizeof(float) * 3);
         predictedPosBuffer = new ComputeBuffer(n, sizeof(float) * 3);
         velocitiesBuffer = new ComputeBuffer(n, sizeof(float) * 3);
@@ -554,10 +497,8 @@ public class PBFSolver : MonoBehaviour
         kClampPredicted = pbfComputeShader.FindKernel("ClampPredicted");
         kDampInsideFluid = pbfComputeShader.FindKernel("DampInsideFluid");
 
-        // اربط الـ Buffers بكل الـ kernels
         BindAllBuffers();
 
-        // احجز CPU arrays للقراءة عند الحاجة
         positionsCPU = new Vector3[n];
         statesCPU = new int[n];
         velocitiesCPU = new Vector3[n];
@@ -570,7 +511,6 @@ public class PBFSolver : MonoBehaviour
             Debug.Log($"[PBF] GPU Buffers allocated — {totalBytes / 1024 / 1024} MB on GPU");
     }
 
-    // ربط كل Buffer بكل kernel
     void BindAllBuffers()
     {
         int[] kernels = {
@@ -596,19 +536,12 @@ public class PBFSolver : MonoBehaviour
         }
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  SpawnParticles — ينشئ الجزيئات على CPU ثم يرفعها للـ GPU
-    // ════════════════════════════════════════════════════════════════
-    // ── يصحّح restDensity حسب الكثافة الحقيقية (Poly6) لتوزيع الجزيئات الفعلي و h الحالي ──
-    // بدل ما نستبدل القيمة اليدوية (يلي فيها فرق بين أنواع الطلاء)، منحسب "نسبة تصحيح"
-    // ونضربها بالقيمة الحالية — هيك منحافظ على الفرق بين watercolor/oil/... الخ.
     void CalibrateRestDensityScale()
     {
         float poly6C = 315f / (64f * Mathf.PI * Mathf.Pow(h, 9));
         float hSq = h * h;
 
-        // شبكة بسيطة على الـ CPU (بدل مقارنة كل جزيء بكل الجزيئات — كانت بطيئة كتير
-        // وبتعلّق Unity مع عدد كبير من الجزيئات، لأنها O(n^2))
+      
         var cellMap = new Dictionary<Vector3Int, List<int>>();
         Vector3Int CellOf(Vector3 p) => new Vector3Int(
             Mathf.FloorToInt(p.x / h), Mathf.FloorToInt(p.y / h), Mathf.FloorToInt(p.z / h));
@@ -658,8 +591,6 @@ public class PBFSolver : MonoBehaviour
         int[] initSt = new int[maxParticles];
         int[] initLayer = new int[maxParticles];
 
-        // توزيع FluidBox-style: شبكة طبقات منتظمة داخل أسطوانة الدلو بدل Random.
-        // السبب: فوق 15K أي تكتل عشوائي بسيط يعمل ضغط زائد وخلايا grid مزدحمة، فيظهر الانفجار.
         float radius = bucketWorldRadius * 0.86f;
         float bottom = -bucketWorldHeight * 0.45f + h * 0.55f;
         float top = bucketWorldHeight * 0.15f - h * 0.35f;
@@ -671,13 +602,12 @@ public class PBFSolver : MonoBehaviour
 
         int count = 0;
 
-        // نحاول نملأ بشكل منتظم. إذا لم يكفِ العدد نقلل المسافة قليلاً ونعيد.
         for (int attempt = 0; attempt < 6 && count < maxParticles; attempt++)
         {
             count = 0;
             int layer = 0;
             float s = spacing * Mathf.Pow(0.92f, attempt);
-            float rowH = s * 0.8660254f;       // hex spacing in XZ
+            float rowH = s * 0.8660254f;    
             float layerH = s * 0.92f;
 
             for (float y = bottom; y <= top && count < maxParticles; y += layerH, layer++)
@@ -690,7 +620,6 @@ public class PBFSolver : MonoBehaviour
                     {
                         if (x * x + z * z > radius * radius) continue;
 
-                        // jitter صغير جداً حتى لا تظهر الجزيئات كشبكة صلبة، لكنه لا يسبب تداخل عشوائي.
                         float jx = Random.Range(-0.035f, 0.035f) * s;
                         float jy = Random.Range(-0.020f, 0.020f) * s;
                         float jz = Random.Range(-0.035f, 0.035f) * s;
@@ -699,7 +628,6 @@ public class PBFSolver : MonoBehaviour
                         float ly = y + jy;
                         float lz = z + jz;
 
-                        // INSIDE particles are bucket-fluid-local, not world-space.
                         initPos[count] = new Vector3(lx, ly, lz);
                         initVel[count] = Vector3.zero;
                         initSt[count] = INSIDE;
@@ -710,14 +638,12 @@ public class PBFSolver : MonoBehaviour
             }
         }
 
-        // fallback فقط إذا كانت الإعدادات ضيقة جداً. نضيف نقاطاً منتظمة شبه عشوائية بدون تكديس بالمركز.
         int guard = 0;
         while (count < maxParticles && guard++ < maxParticles * 4)
         {
             float a = Random.Range(0f, Mathf.PI * 2f);
             float r = radius * Mathf.Sqrt(Random.Range(0f, 1f));
             float y = Random.Range(bottom, top);
-            // INSIDE particles are bucket-fluid-local, not world-space.
             initPos[count] = new Vector3(Mathf.Cos(a) * r, y, Mathf.Sin(a) * r);
             initVel[count] = Vector3.zero;
             initSt[count] = INSIDE;
@@ -739,9 +665,7 @@ public class PBFSolver : MonoBehaviour
             Debug.Log($"[PBF] Spawned {maxParticles} particles with stable lattice spacing={spacing:F4} → GPU");
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  FixedUpdate — Pipeline الكامل على GPU
-    // ════════════════════════════════════════════════════════════════
+
     void FixedUpdate()
     {
         if (!initialized || !bucketTransform) return;
@@ -749,8 +673,7 @@ public class PBFSolver : MonoBehaviour
         float dt = Time.fixedDeltaTime;
         frameCount++;
 
-        // نقيس حركة الدلو من الـ Transform نفسه، مو فقط من سكربت البندول.
-        // هيك السائل يتأثر بأي Animation/Physics/Manual movement للدلو.
+     
         Vector3 curCenter = BucketCenter;
         if (!bucketMotionInitialized)
         {
@@ -783,65 +706,49 @@ public class PBFSolver : MonoBehaviour
 
         UpdateParticleSloshing(dt);
 
-        // تحديث Constants في الـ Compute Shader
         SetShaderConstants(dt);
 
-        // ── GPU Pipeline ─────────────────────────────────────────
-
-        // Pass 0: توقع المواقع الجديدة
+      
         Dispatch(kPredictPositions);
-        Dispatch(kClampPredicted);   // قصّ فوري بعد التوقع، قبل بناء الـ grid
+        Dispatch(kClampPredicted);  
 
-        // Pass 1: بناء الشبكة المكانية
-        DispatchGrid(kClearGrid);   // ClearGrid يعمل على totalCells وليس maxParticles
+        DispatchGrid(kClearGrid);   
         Dispatch(kFillGrid);
 
-        // Pass 2: إيجاد الجيران
         Dispatch(kFindNeighbors);
 
-        // Pass 3: حل الـ Constraints (عدة iterations = دقة أعلى)
-        // لا نجمد السائل فجأة عند توقف البندول؛ نتركه يستقر عبر PBF واللزوجة.
+      
         for (int iter = 0; iter < solverIterations; iter++)
         {
             Dispatch(kSolveConstraints);
             Dispatch(kApplyCorrection);
-            Dispatch(kClampPredicted);   // يطبّق التصحيح على predictedPos ويقصّه كل iteration
+            Dispatch(kClampPredicted);   
         }
 
-        // Pass 4: تحديث السرعة والموقع
         Dispatch(kUpdateVelocity);
 
-        // Pass 4ب: اللزوجة (تماسك داخل الدلو)
         if (viscosity > 0f)
             Dispatch(kApplyViscosity);
 
-        // Pass 4ج: تماسك سطحي بين الجزيئات حتى لا يظهر السائل كحبيبات منفصلة
         if (enableParticleCohesion && particleCohesionStrength > 0f)
             Dispatch(kApplyCohesion);
 
-        // Pass 5: حدود الدلو
         Dispatch(kEnforceBoundary);
 
-        // Pass 5ب: تخميد/سكون الجزيئات داخل الدلو حتى لا تبقى تغلي عندما يتوقف الدلو
         Dispatch(kDampInsideFluid);
 
-        // Pass 6: الجزيئات الساقطة
         Dispatch(kFallingStep);
 
-        // ── CPU Readback ─────────────────────────────────────────
-        // كل فريم: نقرأ positions+states للعرض البصري
-        // كل 5 frames: نضيف velocities + canvas impact + cached values
+    
         if (frameCount % readbackInterval == 0)
             CPUReadback();
         else if (!cpuDataReady)
-            CPUReadback(); // أول مرة نشتغل فيها — نجبر readback فوري
+            CPUReadback(); 
 
         visualDirty = true;
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  UpdateParticleSloshing — يميل الجزيئات نفسها داخل الدلو
-    // ════════════════════════════════════════════════════════════════
+
     void UpdateParticleSloshing(float dt)
     {
         if (!enableParticleSloshing || bucketTransform == null)
@@ -856,8 +763,7 @@ public class PBFSolver : MonoBehaviour
         Vector3 lateralPseudo = Vector3.ProjectOnPlane(-bucketAccelWorld, up);
         Vector3 lateralVel = Vector3.ProjectOnPlane(prevBucketVel, up);
 
-        // Drive مؤقت من حركة الدلو: تسارع + lag من السرعة.
-        // عند توقف الدلو يصير desired = صفر، وما عاد نحقن طاقة بالجزيئات.
+        
         Vector3 sloshDrive = lateralPseudo - lateralVel * 0.22f;
         float driveMag = sloshDrive.magnitude;
 
@@ -868,7 +774,6 @@ public class PBFSolver : MonoBehaviour
             desired = sloshDrive.normalized * Mathf.Clamp01(amount);
         }
 
-        // نابض مخمد. عندما تكون الحركة ضعيفة نرفع التخميد كثيراً حتى لا يبقى overshoot.
         float still01 = 1f - bucketMotionAmount;
         float response = Mathf.Lerp(particleSloshResponse, particleSloshResponse * 0.55f, still01);
         float damping = particleSloshDamping + stillSettleDamping * still01;
@@ -878,7 +783,6 @@ public class PBFSolver : MonoBehaviour
         particleSloshVelocity *= Mathf.Exp(-damping * dt);
         particleSloshVector += particleSloshVelocity * dt;
 
-        // تصفير حازم عند السكون حتى لا تبقى قيمة صغيرة تحرك السطح للأبد.
         if (bucketMotionAmount < 0.08f && desired.sqrMagnitude < 0.0004f)
         {
             float settle = Mathf.Exp(-stillSettleDamping * dt);
@@ -895,17 +799,14 @@ public class PBFSolver : MonoBehaviour
             particleSloshVector = particleSloshVector.normalized;
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  SetShaderConstants — يحدث المتغيرات في الـ Compute Shader
-    // ════════════════════════════════════════════════════════════════
+
     void SetShaderConstants(float dt)
     {
-        // الـ Compute Shader يحسب INSIDE في bucket-fluid-local space.
-        // FALLING يبقى world-space ويستخدم gravity العادية.
+   
         Vector3 gravityLocal = BucketFluidWorldDirToLocal(Vector3.down * G * gravityScale);
         Vector3 accelLocal = BucketFluidWorldDirToLocal(bucketAccelWorld);
         Vector3 sloshLocal = BucketFluidWorldDirToLocal(particleSloshVector);
-        sloshLocal.y = 0f; // التموّج جانبي فقط، والرفع العمودي يحسبه الشيدر حسب side/height.
+        sloshLocal.y = 0f; 
 
         pbfComputeShader.SetFloat("dt", dt);
         pbfComputeShader.SetFloat("h", h);
@@ -926,7 +827,7 @@ public class PBFSolver : MonoBehaviour
         pbfComputeShader.SetFloat("bucketMotionAmount", bucketMotionAmount);
         pbfComputeShader.SetVector("gravityLocal", gravityLocal);
         pbfComputeShader.SetVector("bucketAccelLocal", accelLocal);
-        pbfComputeShader.SetVector("bucketAccel", bucketAccelWorld); // compatibility/debug only
+        pbfComputeShader.SetVector("bucketAccel", bucketAccelWorld);
         pbfComputeShader.SetInt("enableParticleSloshing", enableParticleSloshing ? 1 : 0);
         pbfComputeShader.SetVector("particleSloshVector", sloshLocal);
         pbfComputeShader.SetFloat("particleSloshForce", particleSloshForce);
@@ -937,14 +838,12 @@ public class PBFSolver : MonoBehaviour
         pbfComputeShader.SetInt("maxNeighbors", MAX_NEIGHBORS);
         pbfComputeShader.SetInt("maxPerCell", MAX_PER_CELL);
 
-        // Bucket in local fluid coordinates: y is vertical inside the bucket, xz is cylinder radius.
         pbfComputeShader.SetVector("bucketCenter", Vector3.zero);
         pbfComputeShader.SetVector("bucketUp", Vector3.up);
         pbfComputeShader.SetFloat("bucketRadius", bucketWorldRadius * 0.88f);
         pbfComputeShader.SetFloat("bucketTop", bucketWorldHeight * 0.5f * 0.55f);
         pbfComputeShader.SetFloat("bucketBottom", -bucketWorldHeight * 0.5f + h * 0.4f);
 
-        // Grid is also local to the bucket. This keeps neighbour search stable while the bucket rotates.
         pbfComputeShader.SetInt("gridSizeX", gridSizeX);
         pbfComputeShader.SetInt("gridSizeY", gridSizeY);
         pbfComputeShader.SetInt("gridSizeZ", gridSizeZ);
@@ -952,43 +851,28 @@ public class PBFSolver : MonoBehaviour
         pbfComputeShader.SetFloat("cellSize", cellSize);
     }
 
-    // Dispatch — يشغل kernel على كل الجزيئات
     void Dispatch(int kernel)
     {
         int groups = Mathf.CeilToInt(maxParticles / 256f);
         pbfComputeShader.Dispatch(kernel, groups, 1, 1);
     }
 
-    // Dispatch للـ Grid (حجم مختلف)
     void DispatchGrid(int kernel)
     {
         int groups = Mathf.CeilToInt(totalCells / 256f);
         pbfComputeShader.Dispatch(kernel, groups, 1, 1);
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  CheckCanvasImpacts — اقرأ البيانات من GPU وتحقق من الاصطدامات
-    //
-    //  GPU Readback بطيء (يوقف GPU) — لهيك نعمله كل 5 frames
-    //  الحل المثالي: AsyncGPUReadback (غير متزامن) — للتطوير المستقبلي
-    // ════════════════════════════════════════════════════════════════
-    // ════════════════════════════════════════════════════════════════
-    //  CPUReadback — استدعاء GetData مرة وحدة كل 5 frames
-    //  يشمل: cached values + canvas impacts
-    // ════════════════════════════════════════════════════════════════
+   
     void CPUReadback()
     {
-        // قراءة البيانات من GPU → CPU (مرة وحدة فقط)
         positionsBuffer.GetData(positionsCPU);
         statesBuffer.GetData(statesCPU);
         velocitiesBuffer.GetData(velocitiesCPU);
 
-        // ── 1) تحديث Cached Values للـ BucketHole ────────────────
         Vector3 holePos = HolePosition;
         float sampleRad = bucketWorldRadius * 0.6f;
         UpdateCachedValues(holePos, sampleRad);
-
-        // ── 2) اكتشاف اصطدامات اللوحة ────────────────────────────
         if (canvasTransform == null) return;
 
         bool anyChange = false;
@@ -1001,30 +885,26 @@ public class PBFSolver : MonoBehaviour
             Vector3 wp = positionsCPU[i];
             Vector3 vel = velocitiesCPU[i];
 
-            // نحسب نقطة التقاطع الحقيقية بين مسار الجزيئة ومستوى اللوحة.
-            // هذا أهم من ProjectOntoCanvas(wp) لأن wp قد يكون تخطى اللوحة بين readbacks،
-            // خصوصاً عندما تكون اللوحة مائلة أو readbackInterval أكبر من 1.
+       
             if (!TryGetCanvasImpactPoint(wp, vel, out Vector3 hitWorld, out bool hitInsideCanvas))
                 continue;
 
             if (hitInsideCanvas)
                 DrawSplash(hitWorld, vel, i);
 
-            // حتى لو خارج حدود اللوحة، نعتبرها انتهت حتى لا تظل الجزيئات تخترق المشهد.
             statesCPU[i] = ON_CANVAS;
             anyChange = true;
             impactsThisReadback++;
 
-            // حد أعلى للرسم بكل readback حتى ما يعلق الجهاز
             if (impactsThisReadback >= maxImpactsPerReadback) break;
         }
 
         if (anyChange)
             statesBuffer.SetData(statesCPU);
 
-        visualDirty = true; // نحدّث الـ visual بعد كل readback
+        visualDirty = true; 
 
-        // Debug: تحقق من توزيع حالات الجزيئات كل 60 فريم
+      
         if (verboseDebugLogs && frameCount % 120 == 0)
         {
             int ins = 0, fall = 0, onC = 0;
@@ -1038,9 +918,7 @@ public class PBFSolver : MonoBehaviour
         }
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  SpawnExitParticle — يحول جزيء داخلي لساقط
-    // ════════════════════════════════════════════════════════════════
+
     public void SpawnExitParticle(bool isFromTop)
     {
         if (statesCPU == null || positionsCPU == null || velocitiesCPU == null) return;
@@ -1050,7 +928,6 @@ public class PBFSolver : MonoBehaviour
         int bestIdx = -1;
         float bestDist = float.MaxValue;
 
-        // اختيار خفيف من النسخة CPU الموجودة عندنا، بدون GetData من GPU
         for (int attempt = 0; attempt < 90; attempt++)
         {
             int i = Random.Range(0, maxParticles);
@@ -1064,7 +941,6 @@ public class PBFSolver : MonoBehaviour
             }
         }
 
-        // fallback سريع في حال العشوائي ما لقى جزيئة
         if (bestIdx < 0)
         {
             int scanLimit = Mathf.Min(maxParticles, 400);
@@ -1084,10 +960,7 @@ public class PBFSolver : MonoBehaviour
         colorLayerCPU[bestIdx] = layer;
         statesCPU[bestIdx] = FALLING;
 
-        // خروج متماسك مثل النسخة القديمة:
-        // لا نضيف سرعة السائل الداخلية لكل جزيئة لأنها تختلف من جزيئة لأخرى
-        // وتسبب تفرّق الدهان بعد خروجه كأنه رذاذ.
-        // نضع كل الجزيئات قرب فتحة الخروج وبنفس اتجاه السرعة تقريباً.
+       
         float exitSpread = bucketWorldRadius * 0.045f;
         positionsCPU[bestIdx] = exit + Random.insideUnitSphere * exitSpread;
 
@@ -1096,7 +969,6 @@ public class PBFSolver : MonoBehaviour
         float exitSpeed = Mathf.Lerp(1.3f, 0.25f, SIGMA / 1.2f);
         velocitiesCPU[bestIdx] = bucketVel + exitDir * exitSpeed + Random.insideUnitSphere * 0.012f;
 
-        // رفع عنصر واحد فقط للـ GPU بدل المصفوفات كلها — أخف بكثير
         oneIntUpload[0] = statesCPU[bestIdx];
         statesBuffer.SetData(oneIntUpload, 0, bestIdx, 1);
 
@@ -1112,9 +984,6 @@ public class PBFSolver : MonoBehaviour
             Debug.Log($"[Layer Paint] Released={releasedPaintParticles}, Layer={layer + 1}");
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  DrawSplash — رذاذ حقيقي على اللوحة
-    // ════════════════════════════════════════════════════════════════
     void DrawSplash(Vector3 worldPos, Vector3 worldVel, int particleIndex)
     {
         if (canvasTransform == null) return;
@@ -1125,14 +994,12 @@ public class PBFSolver : MonoBehaviour
         Color col = GetParticleColor(particleIndex);
         float speed = worldVel.magnitude;
 
-        // تأثير السطح واللزوجة بشكل خفيف على الأداء
         float surfaceSpread, surfaceSoftness, surfaceAlpha;
         GetSurfacePaintResponse(out surfaceSpread, out surfaceSoftness, out surfaceAlpha);
 
         float viscSize = Mathf.Lerp(0.8f, 1.7f, Mathf.Clamp01(viscosity));
         int r = Mathf.Max(1, Mathf.RoundToInt(baseBrushSize * surfaceSpread * viscSize * Mathf.Clamp(0.65f + speed * 0.18f, 0.75f, 1.8f)));
 
-        // بصمة رئيسية + اختلاف واضح حسب نوع السطح
         Color main = col;
         main.a = paintDepositStrength * surfaceAlpha;
         if (enableSurfaceEffects)
@@ -1142,7 +1009,6 @@ public class PBFSolver : MonoBehaviour
             float baseAng = dir.sqrMagnitude > 0.0001f ? Mathf.Atan2(dir.y, dir.x) : 0f;
             float forwardness = Mathf.Clamp01(speed * 0.18f);
 
-            // cap يحافظ على الأداء، بس يستعمل البصمات القديمة الواضحة لكل سطح
             int visibleR = Mathf.Clamp(r, 2, 10);
             float dropMul = Mathf.Clamp01(surfaceEffectStrength);
             DrawSurfaceMark(cx, cy, visibleR, baseAng, forwardness, speed, main, surfaceSoftness, dropMul);
@@ -1152,12 +1018,10 @@ public class PBFSolver : MonoBehaviour
             FillCircleSoft(cx, cy, r, main, surfaceSoftness);
         }
 
-        // إذا اللوحة مائلة، ارسم بداية نزول صغيرة فور الاصطدام.
-        // النزول الطويل يستمر لاحقاً في ApplyCanvasPaintDrips داخل Update.
+       
         if (enablePaintDripping)
             DrawInitialGravityRun(cx, cy, r, col, speed);
 
-        // رذاذ اختياري خفيف جداً، مو عشرات البقع
         if (sprayEnabled && splashDroplets > 0)
         {
             Vector3 lv = canvasTransform.InverseTransformVector(worldVel);
@@ -1179,10 +1043,7 @@ public class PBFSolver : MonoBehaviour
     }
 
 
-    // ════════════════════════════════════════════════════════════════
-    //  Canvas Tilt & Paint Dripping
-    //  سيلان الدهان على Texture اللوحة حسب ميلان اللوحة ونوع الدهان والسطح
-    // ════════════════════════════════════════════════════════════════
+
     Color CanvasBackgroundColor() => new Color(0.95f, 0.92f, 0.85f, 1f);
 
     void ApplyCanvasTiltTransform()
@@ -1190,7 +1051,7 @@ public class PBFSolver : MonoBehaviour
         if (!enableCanvasTiltControls || canvasTransform == null) return;
 
         Vector3 e = canvasTransform.localEulerAngles;
-        // نحافظ على Y حتى لا نكسر اتجاه اللوحة بالمشهد، ونغير الميلان فقط.
+       
         canvasTransform.localRotation = Quaternion.Euler(canvasTiltXDeg, e.y, canvasTiltZDeg);
     }
 
@@ -1200,14 +1061,10 @@ public class PBFSolver : MonoBehaviour
         tilt01 = 0f;
         if (canvasTransform == null) return false;
 
-        // اتجاه الجاذبية داخل فضاء اللوحة المحلي.
-        // في الوضع الأفقي الرسم على XZ، وفي الوضع العمودي الرسم على XY.
+      
         Vector3 gLocal = canvasTransform.InverseTransformDirection(Vector3.down);
 
-        // اتجاه الجاذبية في إحداثيات الرسم على الـ Texture.
-        // الإسقاط نفسه صحيح، لكن محور V في عرض الـ Texture على اللوحة يكون غالباً معاكساً
-        // لمحور local Z/ local Y، لذلك نعكس V فقط حتى يظهر سيلان الدهان نزولاً بصرياً
-        // بدل أن يطلع للأعلى. هذا لا يغير مكان نقطة الاصطدام.
+   
         Vector2 raw = canvasIsHorizontal
             ? new Vector2(gLocal.x, gLocal.z)
             : new Vector2(gLocal.x, gLocal.y);
@@ -1217,14 +1074,13 @@ public class PBFSolver : MonoBehaviour
         float m = raw.magnitude;
         tilt01 = Mathf.Clamp01(m);
 
-        if (m < 0.025f) return false; // اللوحة شبه أفقية، ما في نزول واضح
+        if (m < 0.025f) return false; 
         dir = raw / m;
         return true;
     }
 
     float GetPaintDripMobility()
     {
-        // سيولة الدهان قبل حساب اللزوجة الرقمية. الأكبر = ينزل أسرع.
         switch (paintType)
         {
             case PaintType.Ink: return 1.55f;
@@ -1241,9 +1097,7 @@ public class PBFSolver : MonoBehaviour
 
     void GetSurfaceDripResponse(out float mobility, out float absorb, out float sideSpread)
     {
-        // mobility: قابلية الانزلاق على السطح
-        // absorb  : امتصاص/تجفيف، يقلل النزول ويثبت اللون
-        // sideSpread: انتشار جانبي أثناء النزول
+      
         switch (surfaceType)
         {
             case SurfaceType.Paper:
@@ -1271,8 +1125,7 @@ public class PBFSolver : MonoBehaviour
 
     void BlendDripInto(ref Color dst, Color incoming, float strength)
     {
-        // هذا خاص بالسيلان فقط. لا نستخدم BlendCanvasPixel هون حتى لا نغيّر
-        // سلوك المزج الأصلي على اللوحة الأفقية.
+      
         float boosted = Mathf.Clamp01(strength * Mathf.Max(0f, dripMixBoost));
         dst = BlendDripColorOnly(dst, incoming, boosted);
         dst.a = 1f;
@@ -1299,8 +1152,7 @@ public class PBFSolver : MonoBehaviour
         float coverage = 1f - Mathf.Clamp01((old.r + old.g + old.b) / 3f);
         float overlapBoost = Mathf.Lerp(1.00f, 1.30f, coverage);
         Color pigmentMixed = PigmentMixApprox(old, incoming);
-        // مزج السيلان على اللوحة المائلة يستعمل فكرة المشروع القديم نفسها،
-        // لكن مع حفظ أقل للون الساقط حتى يظهر الأخضر/البرتقالي/البنفسجي أثناء النزول.
+        
         Color target = Color.Lerp(pigmentMixed, incoming, 0.10f * paintDepositStrength);
         float mixAmount = Mathf.Clamp01(strength * canvasMixStrength * overlapBoost + 0.16f);
 
@@ -1343,7 +1195,6 @@ public class PBFSolver : MonoBehaviour
         float response = tilt01 * mobility * Mathf.Clamp(0.55f + impactSpeed * 0.12f, 0.55f, 1.7f);
         if (response < dripThreshold) return;
 
-        // الخشب يمدد اللون قليلاً مع العروق الأفقية، لكن يظل للجاذبية دور.
         if (surfaceType == SurfaceType.Wood)
             dir = Vector2.Lerp(dir, new Vector2(Mathf.Sign(dir.x == 0f ? 1f : dir.x), 0f), 0.35f).normalized;
 
@@ -1364,7 +1215,6 @@ public class PBFSolver : MonoBehaviour
             stepCol.a *= (1f - t) * Mathf.Lerp(0.35f, 1f, response);
             FillCircleSoft(x, y, Mathf.Max(1, Mathf.RoundToInt(radius * (1f - t * 0.65f))), stepCol, Mathf.Lerp(0.85f, 0.25f, 1f - absorb));
 
-            // الورق والقماش ينتشران قليلاً جانبياً بدل خط مستقيم تماماً.
             for (int s = 1; s <= sideRepeats; s++)
             {
                 int off = Mathf.RoundToInt(s * sideSpread * r);
@@ -1416,7 +1266,6 @@ public class PBFSolver : MonoBehaviour
                 float transfer = Mathf.Clamp(flow * 0.16f, 0.012f, 0.18f);
                 float sourceFade = transfer * Mathf.Lerp(0.22f, 1.10f, absorb) * Mathf.Lerp(0.25f, 1f, dripDrying);
 
-                // إذا الدهان وصل خارج اللوحة، ينزل من الحافة ويخف المصدر.
                 if (tx < 0 || tx >= canvasWidth || ty < 0 || ty >= canvasHeight)
                 {
                     FadeDripSource(ref dripScratch[idx], sourceFade * 1.25f);
@@ -1427,7 +1276,6 @@ public class PBFSolver : MonoBehaviour
                 FadeDripSource(ref dripScratch[idx], sourceFade);
                 DepositDripPixel(dripScratch, tx, ty, src, transfer);
 
-                // انتشار جانبي خفيف حسب السطح: ورق/قماش أكثر، معدن أقل.
                 float side = transfer * sideSpread * 0.45f;
                 if (side > 0.006f)
                 {
@@ -1450,19 +1298,17 @@ public class PBFSolver : MonoBehaviour
         }
     }
 
-    // استجابة خفيفة لكل نوع سطح: انتشار، نعومة الحافة، كمية اللون
     void GetSurfacePaintResponse(out float spread, out float softness, out float alpha)
     {
-        // القيم مصممة لتبان بالعين بدون ما تثقل المحاكاة
         switch (surfaceType)
         {
-            case SurfaceType.Paper: // يمتص: بقعة عريضة ناعمة وفاتحة
+            case SurfaceType.Paper: 
                 spread = 1.75f; softness = 0.96f; alpha = 0.58f; break;
-            case SurfaceType.Cloth: // نسيج: انتشار متوسط مع خيوط واضحة
+            case SurfaceType.Cloth: 
                 spread = 1.18f; softness = 0.58f; alpha = 0.88f; break;
-            case SurfaceType.Wood:  // خشب: أثر ممدود باتجاه العروق
+            case SurfaceType.Wood: 
                 spread = 1.05f; softness = 0.32f; alpha = 0.98f; break;
-            default:                // معدن: حاد ولمّاع وقطرات صغيرة
+            default:                
                 spread = 0.68f; softness = 0.04f; alpha = 1.00f; break;
         }
 
@@ -1472,14 +1318,12 @@ public class PBFSolver : MonoBehaviour
         alpha = Mathf.Lerp(1.0f, alpha, k);
     }
 
-    // بصمة سطح خفيفة للأداء: لا نرسم عشرات البقع، فقط تفاصيل قليلة
     void DrawLightSurfaceStamp(int cx, int cy, int r, Color col, Vector3 worldVel, float softness)
     {
         switch (surfaceType)
         {
             case SurfaceType.Paper:
                 {
-                    // الورق: امتصاص وهالة ناعمة باهتة حول البقعة
                     Color halo = Color.Lerp(col, Color.white, 0.35f);
                     halo.a = col.a * 0.22f;
                     FillCircleSoft(cx, cy, Mathf.Max(1, Mathf.RoundToInt(r * 1.55f)), halo, 0.95f);
@@ -1489,7 +1333,6 @@ public class PBFSolver : MonoBehaviour
 
             case SurfaceType.Cloth:
                 {
-                    // القماش: البقعة الأساسية + خطوط نسيج قليلة جداً
                     FillCircleSoft(cx, cy, r, col, softness);
                     Color thread = Color.Lerp(col, Color.black, 0.18f);
                     thread.a = col.a * 0.22f;
@@ -1504,7 +1347,6 @@ public class PBFSolver : MonoBehaviour
 
             case SurfaceType.Wood:
                 {
-                    // الخشب: تمدد أفقي مع عروق بسيطة
                     for (int k = -2; k <= 2; k++)
                     {
                         Color c2 = col;
@@ -1520,7 +1362,6 @@ public class PBFSolver : MonoBehaviour
 
             default:
                 {
-                    // المعدن: حافة حادة ولمعة صغيرة
                     FillCircleSoft(cx, cy, r, col, 0.08f);
                     Color hi = Color.Lerp(col, Color.white, 0.80f);
                     hi.a = col.a * 0.35f;
@@ -1530,21 +1371,21 @@ public class PBFSolver : MonoBehaviour
         }
     }
 
-    // بصمة بصرية مميّزة وواقعية لكل نوع سطح
+
     void DrawSurfaceMark(int cx, int cy, int mainR, float baseAng, float forwardness,
                          float speed, Color col, float soft, float dropMul)
     {
         switch (surfaceType)
         {
-            // ── ورق: ألوان مائية — مركز مغسول فاتح + حلقة تغميق بالحافة + نشّ وأصابع ──
             case SurfaceType.Paper:
                 {
-                    Color wash = Color.Lerp(col, Color.white, 0.35f); wash.a = col.a * 0.55f; // مركز مغسول
-                    Color edge = Color.Lerp(col, Color.black, 0.18f); edge.a = col.a * 0.75f; // صبغة متجمّعة بالحافة
+                    Color wash = Color.Lerp(col, Color.white, 0.35f); wash.a = col.a * 0.55f; 
+                    Color edge = Color.Lerp(col, Color.black, 0.18f); edge.a = col.a * 0.75f; 
                     Color halo = col; halo.a = col.a * 0.12f;
 
-                    FillCircleSoft(cx, cy, Mathf.RoundToInt(mainR * 2.4f), halo, 0.98f);      // نشّ واسع
-                    for (int i = 0; i < 4; i++)                                               // أصابع نشّ غير منتظمة — مخففة للأداء
+                    FillCircleSoft(cx, cy, Mathf.RoundToInt(mainR * 2.4f), halo, 0.98f);      
+
+                    for (int i = 0; i < 4; i++)                                            
                     {
                         float a = Random.Range(0f, Mathf.PI * 2f);
                         float d = mainR * Random.Range(1.1f, 2.1f);
@@ -1552,9 +1393,9 @@ public class PBFSolver : MonoBehaviour
                                        cy + Mathf.RoundToInt(Mathf.Sin(a) * d),
                                        Mathf.Max(Mathf.RoundToInt(mainR * Random.Range(0.25f, 0.55f)), 1), halo, 0.97f);
                     }
-                    FillCircleSoft(cx, cy, Mathf.RoundToInt(mainR * 1.3f), edge, 0.7f);       // طبقة الحافة الغامقة
-                    FillCircleSoft(cx, cy, Mathf.RoundToInt(mainR * 1.0f), wash, 0.85f);      // المركز الفاتح فوقها → رِم غامق
-                    for (int i = 0; i < 4; i++)                                               // تحبّب الصبغة — مخفف
+                    FillCircleSoft(cx, cy, Mathf.RoundToInt(mainR * 1.3f), edge, 0.7f);       
+                    FillCircleSoft(cx, cy, Mathf.RoundToInt(mainR * 1.0f), wash, 0.85f);      
+                    for (int i = 0; i < 4; i++)                                              
                     {
                         float a = Random.Range(0f, Mathf.PI * 2f);
                         float d = mainR * Random.Range(0f, 1.1f);
@@ -1564,7 +1405,6 @@ public class PBFSolver : MonoBehaviour
                     break;
                 }
 
-            // ── قماش: نسيج خيوط متعامد (سداء/لحمة) بظلال ──
             case SurfaceType.Cloth:
                 {
                     FillCircleWeave(cx, cy, Mathf.RoundToInt(mainR * 1.2f), col);
@@ -1580,21 +1420,20 @@ public class PBFSolver : MonoBehaviour
                     break;
                 }
 
-            // ── خشب: بقعة ممدودة بقوة باتجاه العرق + عروق دقيقة متعددة + تجمّع بالأخاديد ──
             case SurfaceType.Wood:
                 {
-                    for (int k = -4; k <= 4; k++)   // تمدّد أفقي أوسع
+                    for (int k = -4; k <= 4; k++)   
                     {
                         int ox = cx + k * Mathf.Max(Mathf.RoundToInt(mainR * 0.55f), 1);
                         FillCircleSoft(ox, cy, Mathf.Max(Mathf.RoundToInt(mainR * 0.7f), 1), col, 0.45f);
                     }
-                    for (int g = 0; g < 3; g++)     // عروق دقيقة بدرجات مختلفة — مخففة
+                    for (int g = 0; g < 3; g++)     
                     {
                         int oy = cy + Random.Range(-mainR, mainR);
                         Color gl = col * Random.Range(0.5f, 0.72f); gl.a = col.a * 0.55f;
                         DrawLinePixels(cx - mainR * 3, oy, cx + mainR * 3, oy, gl);
                     }
-                    for (int i = 0; i < 3; i++)     // تجمّع غامق بالأخاديد — مخفف
+                    for (int i = 0; i < 3; i++)     
                     {
                         int ox = cx + Random.Range(-mainR * 3, mainR * 3);
                         int oy = cy + Random.Range(-mainR, mainR);
@@ -1604,7 +1443,7 @@ public class PBFSolver : MonoBehaviour
                     break;
                 }
 
-            // ── معدن: حبيبات لمّاعة حادّة — حافة meniscus غامقة + لمعة بيضا قوية ──
+         
             default:
                 {
                     int beads = Mathf.Clamp(3 + Mathf.RoundToInt(dropMul * 2f + speed * 0.35f), 3, 7);
@@ -1616,19 +1455,18 @@ public class PBFSolver : MonoBehaviour
                         int by = cy + Mathf.RoundToInt(Mathf.Sin(a) * d);
                         int br = Mathf.Max(Mathf.RoundToInt(mainR * Random.Range(0.35f, 0.75f)), 2);
 
-                        Color rim = Color.Lerp(col, Color.black, 0.28f); rim.a = col.a; // حافة الحبّة الغامقة
+                        Color rim = Color.Lerp(col, Color.black, 0.28f); rim.a = col.a; 
                         FillCircle(bx, by, br + 1, rim);
-                        FillCircle(bx, by, br, col);                                    // جسم الحبّة الحادّ
+                        FillCircle(bx, by, br, col);                                    
                         Color hi = Color.Lerp(col, Color.white, 0.85f); hi.a = col.a;
                         int hr = Mathf.Max(br / 4, 1);
-                        FillCircle(bx - Mathf.Max(br / 3, 1), by - Mathf.Max(br / 3, 1), hr, hi); // لمعة قوية
+                        FillCircle(bx - Mathf.Max(br / 3, 1), by - Mathf.Max(br / 3, 1), hr, hi); 
                     }
                     break;
                 }
         }
     }
 
-    // نسيج خيوط متعامد بظلال (سداء عمودي + لحمة أفقية) — للسطح القماشي
     void FillCircleWeave(int cx, int cy, int r, Color c)
     {
         if (r < 1) r = 1;
@@ -1641,16 +1479,13 @@ public class PBFSolver : MonoBehaviour
                 int py = Mathf.Clamp(cy + dy, 0, canvasHeight - 1);
                 int u = px % 6, v = py % 6;
                 bool warp = u < 3, weft = v < 3;
-                float shade = (warp ^ weft) ? 1f : 0.55f;        // فوق-تحت
-                if (u == 0 || v == 0) shade *= 0.4f;             // فراغات الخيوط (ظل)
+                float shade = (warp ^ weft) ? 1f : 0.55f;        
+                if (u == 0 || v == 0) shade *= 0.4f;             
                 float a = c.a * 0.85f * shade;
                 BlendCanvasPixel(py * canvasWidth + px, c, a);
             }
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  Lightweight Layered Color + Canvas Mixing Helpers
-    // ════════════════════════════════════════════════════════════════
     int PaletteCount()
     {
         if (!enableLayeredPaintColors || layerPaintColors == null || layerPaintColors.Length == 0) return 1;
@@ -1670,7 +1505,6 @@ public class PBFSolver : MonoBehaviour
         if (!enableLayeredPaintColors) return 0;
         int count = PaletteCount();
         int perLayer = Mathf.Max(1, particlesPerLayer);
-        // لا نعيد الدوران: طبقة أولى، ثم ثانية، ثم ثالثة، ثم رابعة
         return Mathf.Clamp(releasedPaintParticles / perLayer, 0, count - 1);
     }
 
@@ -1705,15 +1539,13 @@ public class PBFSolver : MonoBehaviour
         Color old = canvasPx[index];
         bool blank = old.r > 0.94f && old.g > 0.94f && old.b > 0.94f;
 
-        // أول طبقة: نرسب اللون مثل المعتاد بدون لمس الأداء العام
         if (blank)
         {
             canvasPx[index] = Color.Lerp(old, incoming, Mathf.Clamp01(strength * paintDepositStrength));
             return;
         }
 
-        // في حال وجود لون سابق: نُظهر المزج بوضوح أكبر، لكن بدون أن نصير ثقيلين.
-        // coverage: كلما صار البكسل أغمق/مصبوغ أكثر نرفع المزج قليلاً.
+       
         float coverage = 1f - Mathf.Clamp01((old.r + old.g + old.b) / 3f);
         float overlapBoost = Mathf.Lerp(1.00f, 1.30f, coverage);
 
@@ -1722,9 +1554,7 @@ public class PBFSolver : MonoBehaviour
 
         float mixAmount = Mathf.Clamp01(strength * canvasMixStrength * overlapBoost + 0.10f);
 
-        // إذا البكسل صار لون ممزوج (أخضر/بنفسجي/برتقالي) بثقة عالية أصلاً، امسح
-        // أي بقايا لون قديم تحته نهائيًا بدل ما نمزج جزئي — هيك ما يرجع يطلع
-        // نقط من لون قديم جوا الشريط الممزوج، لأي مزيج من التلاتة مش الأخضر بس.
+     
         bool oldIsConfidentGreen = old.g > 0.35f && old.r < 0.28f && old.b < 0.28f;
         bool oldIsConfidentPurple = old.r > 0.22f && old.r < 0.42f && old.b > 0.38f && old.g < 0.15f;
         bool oldIsConfidentOrange = old.r > 0.75f && old.g > 0.20f && old.g < 0.60f && old.b < 0.10f;
@@ -1739,7 +1569,6 @@ public class PBFSolver : MonoBehaviour
 
     Color PigmentMixApprox(Color a, Color b)
     {
-        // تقريب خفيف لمزج الأصباغ، بدون خرائط wetness أو عمليات ثقيلة
         bool aRed = a.r > 0.55f && a.g < 0.45f && a.b < 0.45f;
         bool bRed = b.r > 0.55f && b.g < 0.45f && b.b < 0.45f;
         bool aBlue = a.b > 0.50f && a.r < 0.45f && a.g < 0.55f;
@@ -1747,9 +1576,7 @@ public class PBFSolver : MonoBehaviour
         bool aYellow = a.r > 0.65f && a.g > 0.55f && a.b < 0.35f;
         bool bYellow = b.r > 0.65f && b.g > 0.55f && b.b < 0.35f;
 
-        // ألوان ممزوجة سابقًا — لازم نتعرف عليها كحالة قائمة بذاتها،
-        // وإلا كل ضربة جديدة من نفس اللون الأساسي (مثلاً أزرق) بتغسلها
-        // تدريجيًا لأنها ما بتطابق aRed/aBlue/aYellow وبتروح عالمسار العام.
+      
         bool aPurple = a.r > 0.25f && a.r < 0.70f && a.b > 0.32f && a.g < 0.42f;
         bool bPurple = b.r > 0.25f && b.r < 0.70f && b.b > 0.32f && b.g < 0.42f;
         bool aGreen = a.g > 0.35f && a.r < 0.50f && a.b < 0.55f;
@@ -1760,35 +1587,32 @@ public class PBFSolver : MonoBehaviour
         if ((aGreen && (bBlue || bYellow)) || (bGreen && (aBlue || aYellow)))
             return new Color(0.08f, 0.46f, 0.13f, 1f);
         if ((aPurple && (bBlue || bRed)) || (bPurple && (aBlue || aRed)))
-            return new Color(0.30f, 0.03f, 0.46f, 1f); // يضل بنفسجي، ما يرجع يتغسل لأزرق/أحمر صافي
+            return new Color(0.30f, 0.03f, 0.46f, 1f);
         if ((aOrange && (bRed || bYellow)) || (bOrange && (aRed || aYellow)))
             return new Color(0.92f, 0.48f, 0.02f, 1f);
 
         if ((aYellow && bBlue) || (aBlue && bYellow))
-            return new Color(0.08f, 0.46f, 0.13f, 1f); // أصفر + أزرق = أخضر
+            return new Color(0.08f, 0.46f, 0.13f, 1f); 
 
         if ((aRed && bBlue) || (aBlue && bRed))
-            return new Color(0.30f, 0.03f, 0.46f, 1f); // أحمر + أزرق = بنفسجي
+            return new Color(0.30f, 0.03f, 0.46f, 1f);
 
         if ((aRed && bYellow) || (aYellow && bRed))
-            return new Color(0.92f, 0.48f, 0.02f, 1f); // أحمر + أصفر = برتقالي
+            return new Color(0.92f, 0.48f, 0.02f, 1f); 
 
         Color avg = (a + b) * 0.5f;
         avg.a = 1f;
-        // fallback أهدأ من مزج RGB الخام، لكنه يظهر نتيجة واضحة على اللوحة
         Color softened = new Color(
             Mathf.Clamp01(avg.r * 0.96f),
             Mathf.Clamp01(avg.g * 0.96f),
             Mathf.Clamp01(avg.b * 0.96f),
             1f
         );
-        // كانت 0.28 (تسحب بقوة نحو b) — نزّلناها حتى ما تغسل لون ممزوج موجود بسرعة
+       
         return Color.Lerp(softened, b, 0.12f);
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  Trail System
-    // ════════════════════════════════════════════════════════════════
+
     public void UpdateTrail(Vector3 pointWorld, float thickness)
     {
         if (canvasTransform == null) return;
@@ -1810,12 +1634,9 @@ public class PBFSolver : MonoBehaviour
 
     public void BreakTrail() => hasLastTrailPoint = false;
 
-    // ════════════════════════════════════════════════════════════════
-    //  Canvas & Visual Helpers
-    // ════════════════════════════════════════════════════════════════
+ 
     void Update()
     {
-        // مؤقّت زمن الحركة + اختصار الحفظ
         if (pendulum != null && pendulum.IsRunning) motionElapsed += Time.deltaTime;
         if (Input.GetKeyDown(KeyCode.F9)) SaveExperiment();
 
@@ -1824,7 +1645,6 @@ public class PBFSolver : MonoBehaviour
         if (enablePaintDripping && canvasPx != null && frameCount - lastDripFrame >= Mathf.Max(1, dripEveryNFrames))
             ApplyCanvasPaintDrips();
 
-        // if (visualDirty) { UpdateVisualPS(); visualDirty = false; }   // ← off: GPU instanced renderer now handles visuals
         if (canvasDirty && frameCount - lastCanvasApplyFrame >= Mathf.Max(1, canvasApplyEveryNFrames))
         {
             canvasTex.SetPixels(canvasPx);
@@ -1847,16 +1667,15 @@ public class PBFSolver : MonoBehaviour
             }
     }
 
-    // مثل FillCircle بس بحافة ناعمة: softness=0 حادّة (معدن)، softness~0.9 ممتصّة (ورق)
     void FillCircleSoft(int cx, int cy, int r, Color c, float softness)
     {
         if (r < 1) r = 1;
-        float inner = 1f - Mathf.Clamp01(softness); // نسبة نصف القطر المعتمة بالكامل
+        float inner = 1f - Mathf.Clamp01(softness);
         float fade = Mathf.Max(1f - inner, 1e-3f);
         for (int dx = -r; dx <= r; dx++)
             for (int dy = -r; dy <= r; dy++)
             {
-                float dist = Mathf.Sqrt(dx * dx + dy * dy) / r; // 0..1
+                float dist = Mathf.Sqrt(dx * dx + dy * dy) / r; 
                 if (dist > 1f) continue;
                 float edge = dist <= inner ? 1f : Mathf.Clamp01(1f - (dist - inner) / fade);
                 int px = Mathf.Clamp(cx + dx, 0, canvasWidth - 1);
@@ -1946,7 +1765,6 @@ public class PBFSolver : MonoBehaviour
         Vector3 curLocal = canvasTransform.InverseTransformPoint(currentWorld);
         float curPlane = CanvasPlaneCoord(curLocal);
 
-        // إذا لم نرد التقاطع بالمسار، نعود لسلوك الإسقاط، لكن مع محاور صحيحة.
         if (!useTrajectoryCanvasProjection || worldVel.sqrMagnitude < 0.000001f)
         {
             if (Mathf.Abs(curPlane) > canvasImpactTolerance && curPlane > 0f) return false;
@@ -1957,7 +1775,6 @@ public class PBFSolver : MonoBehaviour
             return true;
         }
 
-        // نرجع تقريبياً لموقع الجزيئة قبل آخر readback، ونحسب تقاطع القطعة مع مستوى اللوحة.
         float backDt = Time.fixedDeltaTime * Mathf.Max(1, readbackInterval) * impactBacktrackMultiplier;
         Vector3 prevWorld = currentWorld - worldVel * backDt;
         Vector3 prevLocal = canvasTransform.InverseTransformPoint(prevWorld);
@@ -1996,23 +1813,19 @@ public class PBFSolver : MonoBehaviour
         return IsLocalPointOnCanvas(lp);
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  Public Queries (للـ BucketHole)
-    // ════════════════════════════════════════════════════════════════
+
     public int InsideCount()
     {
-        // نستخدم الـ cached value بدل GetData كل مرة (بطيء مع 80K)
         return cpuDataReady ? cachedInsideCount : maxParticles;
     }
 
     public float GetLiquidHeightAtHole(Vector3 holeWorldPos, float sampleRadius)
     {
-        // cachedLiquidHeight = fillRatio × bucketWorldHeight
-        // يتناقص مع خروج الجزيئات — Torricelli يتغير تدريجياً
+      
         return cpuDataReady ? cachedLiquidHeight : bucketWorldHeight;
     }
 
-    // يُستدعى من CPUReadback لحساب القيم المخزنة
+    
     void UpdateCachedValues(Vector3 holeWorldPos, float sampleRadius)
     {
         int insideC = 0;
@@ -2021,13 +1834,10 @@ public class PBFSolver : MonoBehaviour
 
         cachedInsideCount = insideC;
 
-        // حساب LiqH من نسبة الجزيئات المتبقية × ارتفاع الدلو الكامل
-        // هذا أدق من البحث الهندسي لأن الجزيئات موزعة بشكل موحد داخل الدلو
         float fillRatio = (float)insideC / Mathf.Max(maxParticles, 1);
         cachedLiquidHeight = fillRatio * bucketWorldHeight;
 
-        // هذا اللوج كان يشتغل كل 30 فريم ويبطّئ مع الأعداد الكبيرة.
-        // خليته يشتغل فقط عند تفعيل Verbose Debug Logs من الـ Inspector.
+       
         if (verboseDebugLogs && frameCount % 300 == 0)
             Debug.Log($"[PBF-Cache F={frameCount}] " +
                       $"Inside={insideC}/{maxParticles} | " +
@@ -2039,8 +1849,7 @@ public class PBFSolver : MonoBehaviour
 
     public void RefillBucket()
     {
-        // لأن INSIDE صار local-space و FALLING world-space، أسلم refill هو إعادة ملء الدلو
-        // بشبكة محلية مستقرة بدل تحويل نقاط ساقطة عشوائياً إلى الداخل.
+      
         SpawnParticles();
         CalibrateRestDensityScale();
         cpuDataReady = false;
@@ -2063,7 +1872,6 @@ public class PBFSolver : MonoBehaviour
     public void SaveCanvas(string path = "PaintResult.png")
         => System.IO.File.WriteAllBytes(path, canvasTex.EncodeToPNG());
 
-    // مساحة انتشار اللون (m²) + النسبة المئوية من اللوحة
     public float CoverageArea(out float percent)
     {
         var bg = CanvasBackgroundColor();
@@ -2084,7 +1892,6 @@ public class PBFSolver : MonoBehaviour
         return painted * pixelArea;
     }
 
-    // Detailed English experiment report (inputs + outputs)
     string BuildReport()
     {
         float pct; float cov = CoverageArea(out pct);
@@ -2213,9 +2020,6 @@ public class PBFSolver : MonoBehaviour
         Debug.Log($"[Experiment] تم الحفظ في:\n{png}\n{txt}");
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  Init Helpers
-    // ════════════════════════════════════════════════════════════════
     void InitCanvas()
     {
         canvasTex = new Texture2D(canvasWidth, canvasHeight, TextureFormat.RGBA32, false);
@@ -2244,7 +2048,7 @@ public class PBFSolver : MonoBehaviour
         var main = visualPS.main;
         main.loop = false;
         main.playOnAwake = false;
-        main.maxParticles = Mathf.Min(maxParticles, 50000) + 100; // PS لها حد
+        main.maxParticles = Mathf.Min(maxParticles, 50000) + 100;
         main.startLifetime = float.MaxValue;
         main.startSize = visualParticleSize;
         main.startColor = paintColor;
@@ -2268,8 +2072,7 @@ public class PBFSolver : MonoBehaviour
     {
         if (visualPS == null || !cpuDataReady) return;
 
-        // نستخدم الـ cached CPU data (تتحدث كل 5 frames في CPUReadback)
-        // بدل GetData كل فريم — يوفر bandwidth كبير
+      
         Vector3 center = BucketCenter;
         Vector3 up = BucketUp;
         float sz = h * 1.6f;
@@ -2315,9 +2118,7 @@ public class PBFSolver : MonoBehaviour
         visualPS.SetParticles(visualParticles, visualParticles.Length);
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  Paint Type Settings
-    // ════════════════════════════════════════════════════════════════
+
     public void ApplyPaintType()
     {
         switch (paintType)
@@ -2357,9 +2158,7 @@ public class PBFSolver : MonoBehaviour
         }
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  Debug
-    // ════════════════════════════════════════════════════════════════
+
     void OnDrawGizmos()
     {
         if (!showDebugGizmos || !bucketTransform) return;

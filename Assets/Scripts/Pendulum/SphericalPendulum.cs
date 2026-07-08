@@ -1,26 +1,12 @@
 ﻿using UnityEngine;
 
-// ════════════════════════════════════════════════════════════════════
-//  SphericalPendulum.cs  v2.7
-//  التعديلات عن v2.6:
-//  [FIX-14] UpdatePosition — كان الدلو يوقف "منحرفًا شوي" رغم أن θ=0:
-//           Quaternion.LookRotation(ropeDir, Vector3.up) تنهار رياضيًا لما
-//           يصير ropeDir موازيًا لـ Vector3.up (الدلو تحت الـ pivot تمامًا
-//           عند السكون) فتُرجِع دورانًا بميلان عشوائي.
-//           الحل: نبني الدوران من متجهات الوحدة الكروية نفسها المستخدمة
-//           بالفيزياء (forward = eR على اتجاه الحبل، up = eTheta) — متعامدان
-//           دائمًا ومعرّفان حتى عند θ=0، والنتيجة مطابقة تمامًا للسلوك
-//           القديم أثناء الحركة. كذلك ما عاد φ يُصفَّر عند الرجوع للسكون
-//           (تصفيره كان يلفّ الدلو حول محوره الرأسي بلا داعٍ).
-//  [FIX-15] بقايا فتل الحبل واهتزاز الدلو تُخمَد بنعومة عند التوقف بدل ما
-//           تبقى مجمّدة على آخر قيمة (لأن FixedUpdate يتوقف بعد StopSimulation).
-// ════════════════════════════════════════════════════════════════════
+
 
 public class SphericalPendulum : MonoBehaviour
 {
     public Transform bucket;
     public Transform pivot;
-    public PBFSolver paintSolver;   // للحفظ من زر الـ HUD (يُلقى تلقائيًا إن تُرك فاضي)
+    public PBFSolver paintSolver;  
 
     [Header("Bucket Properties — خصائص الدلو")]
     [Tooltip("كتلة الدلو + الطلاء (kg).")]
@@ -42,7 +28,6 @@ public class SphericalPendulum : MonoBehaviour
     [Header("Fluid Sloshing — تمايل السائل")]
     public bool enableFluidSloshing = true;
     public float fluidMass = 0.6f;
-    // [FIX-REAL] طول بندول التمايل أقصر = استجابة أسرع لحركة الدلو
     public float sloshPendulumLength = 0.15f;
     [Range(0f, 10f)] public float sloshDamping = 2f;
     public float sloshMaxDisplacement = 0.12f;
@@ -66,12 +51,10 @@ public class SphericalPendulum : MonoBehaviour
     public float restLength = 1.5f;
 
     [Tooltip("صلابة الحبل k (N/m). خُفِّضت لتسمح بامتداد ملموس وواقعي.")]
-    // [FIX-REAL] 10000 كان صلباً جداً → الحبل لا يمتد بشكل مرئي
-    // 200 يعطي امتداداً طبيعياً مثل حبل القماش الحقيقي
+  
     public float ropeStiffness = 200f;
 
     [Tooltip("تخميد التمدد الطولي للحبل.")]
-    // [FIX-REAL] زيادة التخميد لمنع الاهتزاز الطولي المبالغ فيه
     public float radialDamping = 2f;
 
     [Tooltip("الحبل يشدّ فقط ولا يدفع.")]
@@ -90,9 +73,7 @@ public class SphericalPendulum : MonoBehaviour
     [Range(0.01f, 179f)] public float thetaDeg = 45f;
     [Range(0f, 360f)] public float phiDeg = 0f;
     public float thetaVel0 = 0f;
-    // [FIX-REAL] سرعة زاوية أولية حول المحور الرأسي
-    // تعطي الدلو حركة بيضاوية ثلاثية الأبعاد بدل الذهاب والإياب المستوي
-    // 0 = حركة مستوية | 0.3~0.8 = مسار بيضاوي | 1.0+ = مسار دائري
+  
     public float phiVel0 = 0.4f;
 
     public float theta, phi, thetaVel, phiVel;
@@ -140,7 +121,7 @@ public class SphericalPendulum : MonoBehaviour
     int zeroCrossCount = 0;
     float prevThetaVel;
     bool simRunning = true;
-    bool returningToRest = false;  // لما يوقف يرجع ناعم للوضع الطبيعي
+    bool returningToRest = false; 
     string stopReason = "—";
     float energyAtStart = 0f;
     float maxEnergyDrift = 0f;
@@ -149,7 +130,6 @@ public class SphericalPendulum : MonoBehaviour
     Vector3 lastBucketVelocity = Vector3.zero;
     Vector3 sloshPrevVelocity = Vector3.zero;
 
-    // ════════════════════════════════════════════════════════════════
     void Start()
     {
         if (pivot != null) pivot.position = pivotPosition;
@@ -176,26 +156,19 @@ public class SphericalPendulum : MonoBehaviour
                   $"E0={energyAtStart:F3} J | T={TheoreticalPeriod():F3} s");
     }
 
-    // ════════════════════════════════════════════════════════════════
     void Update()
     {
-        // لما البندول يوقف، يرجع الدلو للوضع الطبيعي بشكل ناعم
         if (!returningToRest) return;
 
-        float speed = 2.5f; // سرعة الرجوع — رفعها لو بدك أسرع
+        float speed = 2.5f;
         theta = Mathf.Lerp(theta, 0f, Time.deltaTime * speed);
 
-        // [FIX-14] ما منلمس φ: عند θ≈0 هو مجرد دوران حول المحور الرأسي،
-        // وتصفيره كان يلفّ الدلو حول نفسه وهو واقف بلا أي معنى فيزيائي.
 
-        // [FIX-15] فتل الحبل والاهتزاز يرجعوا للصفر بنعومة هنّ كمان،
-        // وإلا بيضلوا مجمّدين على آخر قيمة (FixedUpdate واقف بعد التوقف)
         ropeTwistAngle = Mathf.Lerp(ropeTwistAngle, 0f, Time.deltaTime * speed);
         vibrationStrength = Mathf.Lerp(vibrationStrength, 0f, Time.deltaTime * speed);
 
         UpdatePosition();
 
-        // لما وصل قريب من الصفر، وقف
         if (theta < 0.002f)
         {
             theta = 0f;
@@ -207,7 +180,6 @@ public class SphericalPendulum : MonoBehaviour
         }
     }
 
-    // ════════════════════════════════════════════════════════════════
     void FixedUpdate()
     {
         if (!simRunning) return;
@@ -264,7 +236,6 @@ public class SphericalPendulum : MonoBehaviour
         }
     }
 
-    // ════════════════════════════════════════════════════════════════
     void UpdateSecondaryEffects(float dt)
     {
         if (enableBucketVibration)
@@ -289,14 +260,13 @@ public class SphericalPendulum : MonoBehaviour
         }
     }
 
-    // ════════════════════════════════════════════════════════════════
     void UpdateSloshing(float dt)
     {
         if (!enableFluidSloshing || fluidMass <= 0f) return;
 
         float Lf = Mathf.Max(sloshPendulumLength, 0.01f);
         float ks = fluidMass * gravity / Lf;
-        float cs = sloshDamping + fadeOutFriction * 2f; // نفس منطق fadeOutFriction، يخلي التمايل يهدأ أسرع وقت الفيدأوت
+        float cs = sloshDamping + fadeOutFriction * 2f; 
 
         Vector3 vNow = LinearVelocity(theta, phi, r, thetaVel, phiVel, rVel);
         Vector3 aWorld = (vNow - sloshPrevVelocity) / Mathf.Max(dt, 1e-4f);
@@ -323,7 +293,6 @@ public class SphericalPendulum : MonoBehaviour
     public float SloshMagnitude =>
         Mathf.Sqrt(sloshThetaDir * sloshThetaDir + sloshPhiDir * sloshPhiDir);
 
-    // ════════════════════════════════════════════════════════════════
     void UpdatePosition()
     {
         float x = r * Mathf.Sin(theta) * Mathf.Cos(phi);
@@ -346,12 +315,7 @@ public class SphericalPendulum : MonoBehaviour
             bucket.localScale = new Vector3(s, s, s);
         }
 
-        // [FIX-14] LookRotation(ropeDir, Vector3.up) كانت تنهار لما ropeDir
-        // يوازي Vector3.up (أي θ≈0 والدلو واقف تحت الـ pivot تمامًا) →
-        // دوران بميلان عشوائي، فكان الدلو يوقف "منحرف شوي".
-        // الحل: نفس الإطار مبني من متجهات الوحدة الكروية (eR = اتجاه الحبل،
-        // eTheta = العمودي عليه). متعامدان دائمًا ومعرّفان حتى عند θ=0،
-        // والنتيجة مطابقة للسلوك القديم أثناء الحركة الطبيعية.
+       
         Vector3 eR, eTheta, ePhi;
         GetUnitVectors(theta, phi, out eR, out eTheta, out ePhi);
         Quaternion swingRot = Quaternion.LookRotation(eR, eTheta);
@@ -360,20 +324,6 @@ public class SphericalPendulum : MonoBehaviour
         bucket.rotation = swingRot;
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  HandleCollision — تصادم واقعي مع الأرض
-    //
-    //  الفيزياء:
-    //  عند الاصطدام، السرعة الشعاعية (على محور r) تنعكس مع فقدان طاقة
-    //  بمعامل الارتداد (bounce). السرعة الزاوية تفقد طاقة أيضاً لكن
-    //  بنسبة مختلفة لأنها عمودية على اتجاه الاصطدام.
-    //
-    //  [FIX-COL] التحسينات عن النسخة القديمة:
-    //  ١. حساب السرعة الخطية الكاملة عند الاصطدام وتحليلها
-    //  ٢. فقدان الطاقة يعتمد على bounce² (معامل الطاقة لا السرعة)
-    //  ٣. thetaVel وphiVel يفقدان طاقة بنسبة (1-bounce) لا ثابت 0.7
-    //  ٤. إضافة حد أدنى لـ bounce لمنع التوقف الفجائي
-    // ════════════════════════════════════════════════════════════════
     void HandleCollision()
     {
         float cosT = Mathf.Cos(theta);
@@ -381,38 +331,28 @@ public class SphericalPendulum : MonoBehaviour
 
         if (bucketBottomY >= floorY) return;
 
-        // وقت الفيدأوت، الارتداد لازم يخف مع الوقت هو كمان (مش بس thetaVel/phiVel)
-        // وإلا الدلو بيضل يرتد عن الأرض بنفس القوة بعد ما باقي الحركة خفّت،
-        // وهاد يبين كحركة مفاجئة/غريبة قبل التوقف مباشرة
         float bounceNow = bounce;
         if (fadeOutStarted)
             bounceNow = bounce * (1f - Mathf.Clamp01(fadeOutTimer / fadeOutDuration));
 
-        // ── تصحيح موقع r ─────────────────────────────────────────
         float newR = (Mathf.Abs(cosT) > 0.01f)
             ? (pivotPosition.y - floorY - bucketRadius) / cosT
             : r;
         newR = Mathf.Max(newR, 0.2f);
         r = newR;
 
-        // ── السرعة الخطية الكاملة لحظة الاصطدام ─────────────────
         Vector3 vel = LinearVelocity(theta, phi, r, thetaVel, phiVel, rVel);
         float impactSpeed = vel.magnitude;
 
-        // ── انعكاس السرعة الشعاعية مع فقدان طاقة ────────────────
-        // rVel هو مركبة السرعة على محور الحبل (اتجاه الاصطدام)
         if (rVel < 0f)
             rVel = -rVel * bounceNow;
 
-        // ── فقدان الطاقة في السرعة الزاوية ───────────────────────
-        // عند الاصطدام تُفقد طاقة بنسبة (1 - bounce²) من الحركة الزاوية
-        // bounce=1 (مرن تام) → لا فقدان | bounce=0 (غير مرن) → توقف كامل
+     
         float energyRetain = Mathf.Sqrt(Mathf.Clamp01(
             bounceNow * bounceNow + (1f - bounceNow * bounceNow) * Mathf.Abs(cosT)));
         thetaVel *= energyRetain;
         phiVel *= energyRetain;
 
-        // ── اهتزاز بصري عند الاصطدام ─────────────────────────────
         if (enableBucketVibration)
             vibrationStrength = Mathf.Clamp01(vibrationStrength
                 + Mathf.Clamp01(impactSpeed * 0.15f));
@@ -421,7 +361,6 @@ public class SphericalPendulum : MonoBehaviour
                   $" | bounce={bounceNow:F2} | retain={energyRetain:F2}");
     }
 
-    // ════════════════════════════════════════════════════════════════
     void RK4Step(float dt)
     {
         Vector6 s0 = new Vector6(theta, phi, r, thetaVel, phiVel, rVel);
@@ -434,7 +373,6 @@ public class SphericalPendulum : MonoBehaviour
         thetaVel = result.d; phiVel = result.e; rVel = result.f;
     }
 
-    // ════════════════════════════════════════════════════════════════
     Vector6 Derivatives(Vector6 s)
     {
         float th = s.a, ph = s.b, rr = s.c;
@@ -448,11 +386,9 @@ public class SphericalPendulum : MonoBehaviour
         rr = Mathf.Max(rr, 0.1f);
         float mass = Mathf.Max(bucketMass, 0.01f);
 
-        // الرطوبة تزيد كثافة الهواء الفعلية (تأثير طفيف على السحب)
         float rhoEff = airDensity * (1f + humidity * 0.01f);
 
-        // [FIX-HUM] الرطوبة تزيد احتكاك المفصل بشكل واقعي:
-        // الحبل الرطب أثقل وأكثر مقاومة — humidity=0→+0% | humidity=1→+40%
+       
         float humidFriction = jointFriction * humidity * 0.4f;
 
         Vector3 vBucket = LinearVelocity(th, ph, rr, thVel, phVel, rrVel);
@@ -481,8 +417,7 @@ public class SphericalPendulum : MonoBehaviour
             float Fphi = ks * sloshPhiDir + cs * sloshPhiDirVel;
             float mTotal = mass + fluidMass;
 
-            // وقت الفيدأوت، هاي القوة لازم تخف لصفر هي كمان — وإلا
-            // بتضل ترجّع طاقة عالدلو بعد ما باقي الحركة خفّت، وهاد سبب "الفتلة"
+         
             float sloshFadeScale = 1f;
             if (fadeOutStarted)
                 sloshFadeScale = 1f - Mathf.Clamp01(fadeOutTimer / fadeOutDuration);
@@ -491,7 +426,6 @@ public class SphericalPendulum : MonoBehaviour
             sloshPhi = Mathf.Clamp(-Fphi / (mTotal * rr * sinT), -8f, 8f) * sloshFadeScale;
         }
 
-        // [FIX-13] الاحتكاك الكلي = jointFriction + fadeOutFriction + humidFriction
         float totalFriction = jointFriction + fadeOutFriction + humidFriction;
 
         float thetaAcc =
@@ -527,7 +461,7 @@ public class SphericalPendulum : MonoBehaviour
         return new Vector6(thVel, phVel, rrVel, thetaAcc, phiAcc, rAcc);
     }
 
-    // ════════════════════════════════════════════════════════════════
+    
     void GetUnitVectors(float th, float ph,
                         out Vector3 eR, out Vector3 eTheta, out Vector3 ePhi)
     {
@@ -549,7 +483,6 @@ public class SphericalPendulum : MonoBehaviour
         return new Vector3(vx, vy, vz);
     }
 
-    // ════════════════════════════════════════════════════════════════
     bool HasNaN()
     {
         return float.IsNaN(theta) || float.IsInfinity(theta)
@@ -566,9 +499,7 @@ public class SphericalPendulum : MonoBehaviour
         returningToRest = true;
         stopReason = reason;
 
-        // لازم نصفّر السرعة الزاوية هون، وإلا GetBucketVelocity() بترجع نفس
-        // الرقم القديم للأبد (الزاوية بتوقف تتحدث، بس السرعة بتضل "عالقة")
-        // وهاد كان سبب استمرار تمايل/غليان السائل جوا الدلو بعد التوقف الكامل.
+        
         thetaVel = 0f;
         phiVel = 0f;
         rVel = 0f;
@@ -578,32 +509,10 @@ public class SphericalPendulum : MonoBehaviour
         if (trail != null) trail.emitting = false;
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  [FIX-12] CheckStopConditions — إصلاح شرط التوقف الكامل
-    //
-    //  المشكلة القديمة:
-    //  fullyDone كان يشترط theta < 0.003f
-    //  هذا الشرط نادراً ما يتحقق بشكل طبيعي لأن البندول يتوقف
-    //  عند زاوية صغيرة لكن ليست صفراً، فيبقى الـ fadeOut يعمل إلى
-    //  ما لا نهاية أو يتوقف فجأة عند حد ثانوي → مظهر غير طبيعي.
-    //
-    //  الحل:
-    //  1) استخدام angularEnergy < 0.0005f بدل theta < 0.003f
-    //     (الطاقة الحركية الزاوية تعكس الحركة الفعلية بدقة أكبر)
-    //  2) إضافة شرط احتياطي: fadeOutTimer >= fadeOutDuration
-    //     يضمن التوقف بعد انتهاء المدة المحددة حتى لو ظل هناك حركة خفيفة
-    //
-    //  [FIX-13] fadeOutFriction يزيد خطياً (Linear) لا تربيعياً (t*t)
-    //  t*t كان يُبطئ التخميد في البداية ويُعجّله في النهاية →
-    //  يُنتج توقفاً يبدو مفاجئاً عند t ≈ 1
-    //  الخطي أكثر سلاسة وطبيعية
-    // ════════════════════════════════════════════════════════════════
     void CheckStopConditions()
     {
         bool swingsReached = zeroCrossCount >= 2 * n_swings;
-        // [FIX-REAL] naturalStop يعتمد على الطاقة الحركية الكلية
-        // الشرط القديم theta < 0.008 كان يفشل مع الحركة ثلاثية الأبعاد
-        // لأن البندول ممكن يستمر بالدوران بزاوية ثابتة (مسار دائري)
+     
         float kineticEnergy = 0.5f * bucketMass * (
             r * r * thetaVel * thetaVel +
             r * r * Mathf.Sin(theta) * Mathf.Sin(theta) * phiVel * phiVel +
@@ -626,7 +535,6 @@ public class SphericalPendulum : MonoBehaviour
             fadeOutTimer += Time.fixedDeltaTime * timeScale;
             float t = Mathf.Clamp01(fadeOutTimer / fadeOutDuration);
 
-            // [FIX-13] خطي بدل تربيعي — توزيع أكثر اتساقاً للتخميد
             fadeOutFriction = Mathf.Lerp(0f, fadeMaxFriction, t);
 
             float angularEnergy =
@@ -634,7 +542,6 @@ public class SphericalPendulum : MonoBehaviour
                 + Mathf.Abs(phiVel)
                 + Mathf.Abs(rVel);
 
-            // [FIX-12] شرط محسَّن: طاقة صغيرة جداً أو انتهت المدة
             bool fullyDone =
                   angularEnergy < 0.0005f
                || fadeOutTimer >= fadeOutDuration;
@@ -714,14 +621,9 @@ public class SphericalPendulum : MonoBehaviour
     public int SwingCount => zeroCrossCount / 2;
     public float EnergyAtStart => energyAtStart;
 
-    // ════════════════════════════════════════════════════════════════
-    //  ResetSimulation — إعادة التشغيل الكاملة
-    //  تعيد جميع المتغيرات لقيمها الابتدائية وتبدأ المحاكاة من جديد
-    //  يمكن استدعاؤها من UI أو من سكربت خارجي
-    // ════════════════════════════════════════════════════════════════
+   
     public void ResetSimulation()
     {
-        // ── إعادة الحالة الفيزيائية ───────────────────────────────
         theta = thetaDeg * Mathf.Deg2Rad;
         phi = phiDeg * Mathf.Deg2Rad;
         thetaVel = thetaVel0;
@@ -729,39 +631,33 @@ public class SphericalPendulum : MonoBehaviour
         r = restLength;
         rVel = 0f;
 
-        // ── إعادة متغيرات التمايل ─────────────────────────────────
         sloshThetaDir = 0f;
         sloshThetaDirVel = 0f;
         sloshPhiDir = 0f;
         sloshPhiDirVel = 0f;
         sloshPrevVelocity = LinearVelocity(theta, phi, r, thetaVel, phiVel, rVel);
 
-        // ── إعادة متغيرات الفتل والاهتزاز ────────────────────────
         ropeTwistAngle = 0f;
         ropeTwistVelocity = 0f;
         vibrationPhase = 0f;
         vibrationStrength = 0f;
 
-        // ── إعادة متغيرات التحكم ──────────────────────────────────
         zeroCrossCount = 0;
         prevThetaVel = thetaVel;
         simRunning = true;
         nanFrameCount = 0;
         maxEnergyDrift = 0f;
 
-        // ── إعادة fadeOut ─────────────────────────────────────────
         fadeOutStarted = false;
         fadeOutTimer = 0f;
         fadeOutFriction = 0f;
 
-        // ── إعادة الـ Trail ───────────────────────────────────────
         if (trail != null)
         {
             trail.Clear();
             trail.emitting = true;
         }
 
-        // ── إعادة موقع الـ pivot ──────────────────────────────────
         if (pivot != null) pivot.position = pivotPosition;
 
         UpdatePosition();
@@ -806,13 +702,10 @@ public class SphericalPendulum : MonoBehaviour
         GUI.Label(new Rect(x, y + lh * 9, 230, lh), $"Radius     : {bucketRadius:F3} → Scale:{currentScale:F3}", hudStyle);
         GUI.Label(new Rect(x, y + lh * 10, 230, lh), $"CrossArea  : {BucketCrossArea:F5} m²", hudStyle);
         GUI.Label(new Rect(x, y + lh * 11, 230, lh), $"Humidity   : {humidity * 100f:F0}% → +{humidity * 40f:F1}% friction", hudStyle);
-        // السطران الجديدان
         GUI.Label(new Rect(x, y + lh * 12, 230, lh), $"Slosh      : {SloshMagnitude:F3} m", hudStyle);
         GUI.Label(new Rect(x, y + lh * 13, 230, lh), $"Energy     : {TotalEnergy():F3} J", hudStyle);
-        // زر Reset
         if (GUI.Button(new Rect(x, y + lh * 14 + 4, 100, 22), "Reset"))
             ResetSimulation();
-        // زر حفظ التجربة (صورة + تقرير)
         if (GUI.Button(new Rect(x + 108, y + lh * 14 + 4, 100, 22), "حفظ / Save"))
         {
             if (paintSolver == null) paintSolver = FindFirstObjectByType<PBFSolver>();
@@ -820,7 +713,6 @@ public class SphericalPendulum : MonoBehaviour
         }
     }
 }
-// ════════════════════════════════════════════════════════════════════
 public struct Vector6
 {
     public float a, b, c, d, e, f;

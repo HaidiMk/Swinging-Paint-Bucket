@@ -1,22 +1,5 @@
 ﻿using UnityEngine;
 
-// ════════════════════════════════════════════════════════════════════
-//  ControlPanelUI.cs
-//  Runtime control panel shown during Play Mode (OnGUI, no Canvas needed).
-//  Organized into tabs so it doesn't turn into one giant scrolling list.
-//
-//  Tabs:
-//  - Swing      : pendulum start angle/direction/swings + environment (wind)
-//  - Bucket     : mass, radius, hole, rope
-//  - Paint      : paint type, surface type, brush/splash settings
-//  - Mixing     : canvas mixing strength, cohesion, viscosity, sloshing
-//  - Colors     : the 4 layer colors
-//  - Canvas     : size, tilt, dripping + particle count (needs restart)
-//  - Report     : live results + save experiment (image + txt report)
-//  - Compare    : last two saved experiments side by side
-//
-//  Press Tab to show/hide the panel.
-// ════════════════════════════════════════════════════════════════════
 public class ControlPanelUI : MonoBehaviour
 {
     [Header("References — assign in Inspector")]
@@ -31,18 +14,16 @@ public class ControlPanelUI : MonoBehaviour
     Rect windowRect = new Rect(10, 10, 430, 620);
     Vector2 scroll;
 
-    string[] tabNames = { "🌀 Swing", "🪣 Bucket", "🎨 Paint", "🧪 Mixing", "🌈 Colors", "🖼 Canvas", "📊 Report", "🔍 Compare" };
+    string[] tabNames = { "🌀 Swing", "🪣 Bucket", "🎨 Paint", "🧪 Mixing", "💧 Colors", "🖼 Canvas", "📊 Report", "🔍 Compare" };
     int currentTab = 0;
 
-    // Pending slider values — applied only when the "Launch" button is
-    // pressed, so dragging the slider doesn't reset the pendulum every frame.
+
     float pendingThetaDeg;
     float pendingPhiDeg;
     int pendingSwings;
     float pendingThetaVel0;
     float pendingPhiVel0;
 
-    // ── Custom styles for a cleaner look ────────────────────────────
     GUIStyle headerStyle;
     GUIStyle sectionBoxStyle;
     GUIStyle labelStyle;
@@ -175,8 +156,7 @@ public class ControlPanelUI : MonoBehaviour
 
     void DrawWindow(int id)
     {
-        // حماية: لو أي رسم سابق (مربع لون) ما نظّف GUI.color صح، هون منرجعه أبيض
-        // قبل ما نرسم أي شي — هاد سبب مشكلة "لون اللوحة عم يروح" وقت الضغط.
+ 
         GUI.color = Color.white;
 
         DrawTabBar();
@@ -243,7 +223,6 @@ public class ControlPanelUI : MonoBehaviour
             currentTab = i;
     }
 
-    // ── Pendulum swing setup ─────────────────────────────────────────
     void DrawPendulumSection()
     {
         GUILayout.BeginVertical(sectionBoxStyle);
@@ -278,7 +257,6 @@ public class ControlPanelUI : MonoBehaviour
         GUILayout.EndVertical();
     }
 
-    // ── Environment (applies instantly, no restart needed) ───────────
     void DrawEnvironmentSection()
     {
         GUILayout.BeginVertical(sectionBoxStyle);
@@ -297,8 +275,7 @@ public class ControlPanelUI : MonoBehaviour
         GUILayout.Label($"Air drag: {pendulum.dragCoefficient:F2}", sliderLabelStyle);
         pendulum.dragCoefficient = GUILayout.HorizontalSlider(pendulum.dragCoefficient, 0f, 1.5f);
 
-        // ── الرياح: المتغير windVelocity موجود أصلاً بمعادلات السحب
-        //    (vRel = vBucket - windVelocity)، هون بس منعرضه للمستخدم
+  
         GUILayout.Space(6);
         Vector3 wind = pendulum.windVelocity;
 
@@ -313,14 +290,12 @@ public class ControlPanelUI : MonoBehaviour
         if (GUILayout.Button("No Wind (0, 0)", buttonStyle))
             pendulum.windVelocity = Vector3.zero;
 
-        // الرياح بتأثر عن طريق قوة السحب، فإذا السحب صفر ما رح يبين إلها أثر
         if (pendulum.dragCoefficient <= 0.01f)
             GUILayout.Label("(wind has no effect while Air drag = 0)", sliderLabelStyle);
 
         GUILayout.EndVertical();
     }
 
-    // ── Paint type ─────────────────────────────────────────────────
     void DrawPaintTypeSection()
     {
         GUILayout.BeginVertical(sectionBoxStyle);
@@ -337,7 +312,7 @@ public class ControlPanelUI : MonoBehaviour
             if (GUILayout.Button(t.ToString(), isActive ? activeButtonStyle : buttonStyle))
             {
                 solver.paintType = t;
-                solver.ApplyPaintType(); // applies live, no restart needed
+                solver.ApplyPaintType(); 
             }
             col++;
             if (col % 2 == 0) { GUILayout.EndHorizontal(); GUILayout.BeginHorizontal(); }
@@ -346,7 +321,6 @@ public class ControlPanelUI : MonoBehaviour
         GUILayout.EndVertical();
     }
 
-    // ── Bucket & suspension properties ───────────────────────────────
     void DrawBucketSection()
     {
         GUILayout.BeginVertical(sectionBoxStyle);
@@ -393,7 +367,6 @@ public class ControlPanelUI : MonoBehaviour
         pendulum.pivotPosition = p;
         GUILayout.EndVertical();
     }
-    // ── Canvas dimensions & orientation ──────────────────────────────
     void DrawCanvasSection()
     {
         GUILayout.BeginVertical(sectionBoxStyle);
@@ -504,7 +477,6 @@ public class ControlPanelUI : MonoBehaviour
         GUILayout.EndVertical();
     }
 
-    // ── Live experiment report ───────────────────────────────────────
     void DrawReportSection()
     {
         GUILayout.BeginVertical(sectionBoxStyle);
@@ -524,7 +496,7 @@ public class ControlPanelUI : MonoBehaviour
 
         GUILayout.Space(8);
         if (GUILayout.Button("💾  Save Canvas Image", buttonStyle))
-            solver.SaveExperiment(); // بيحفظ الصورة + تقرير نصي مع بعض بنفس المجلد
+            solver.SaveExperiment(); 
         GUILayout.EndVertical();
     }
 
@@ -540,13 +512,12 @@ public class ControlPanelUI : MonoBehaviour
         {
             bool isActive = solver.surfaceType == s;
             if (GUILayout.Button(s.ToString(), isActive ? activeButtonStyle : buttonStyle))
-                solver.surfaceType = s; // read every splash, so it's instant
+                solver.surfaceType = s; 
         }
         GUILayout.EndHorizontal();
         GUILayout.EndVertical();
     }
 
-    // ── Brush / splash look ───────────────────────────────────────
     void DrawBrushSection()
     {
         GUILayout.BeginVertical(sectionBoxStyle);
@@ -565,7 +536,6 @@ public class ControlPanelUI : MonoBehaviour
         GUILayout.EndVertical();
     }
 
-    // ── Canvas color mixing ──────────────────────────────────────────
     void DrawMixingSection()
     {
         GUILayout.BeginVertical(sectionBoxStyle);
@@ -583,7 +553,7 @@ public class ControlPanelUI : MonoBehaviour
         GUILayout.EndVertical();
     }
 
-    // ── Fluid cohesion / viscosity ────────────────────────────────────
+    
     void DrawCohesionSection()
     {
         GUILayout.BeginVertical(sectionBoxStyle);
@@ -604,7 +574,6 @@ public class ControlPanelUI : MonoBehaviour
         GUILayout.EndVertical();
     }
 
-    // ── Particle sloshing inside the bucket ──────────────────────────
     void DrawSloshingSection()
     {
         GUILayout.BeginVertical(sectionBoxStyle);
@@ -622,7 +591,6 @@ public class ControlPanelUI : MonoBehaviour
         GUILayout.EndVertical();
     }
 
-    // ── Particle count (needs a full restart) ─────────────────────
     void DrawParticleCountSection()
     {
         GUILayout.BeginVertical(sectionBoxStyle);
@@ -641,7 +609,6 @@ public class ControlPanelUI : MonoBehaviour
         GUILayout.EndVertical();
     }
 
-    // ── The 4 layer colors ────────────────────────────────────────
     static readonly Color PresetRed = new Color(0.85f, 0.15f, 0.15f, 1f);
     static readonly Color PresetYellow = new Color(0.90f, 0.80f, 0.10f, 1f);
     static readonly Color PresetBlue = new Color(0.15f, 0.35f, 0.85f, 1f);
@@ -669,7 +636,6 @@ public class ControlPanelUI : MonoBehaviour
             GUILayout.EndVertical();
             GUILayout.EndHorizontal();
 
-            // أزرار ألوان جاهزة — ضغطة وحدة تخلي هالطبقة أحمر/أصفر/أزرق مباشرة
             GUILayout.BeginHorizontal();
             if (DrawPresetSwatchButton(PresetRed)) c = PresetRed;
             if (DrawPresetSwatchButton(PresetYellow)) c = PresetYellow;
@@ -682,7 +648,6 @@ public class ControlPanelUI : MonoBehaviour
         GUILayout.EndVertical();
     }
 
-    // مربع لون قابل للضغط — بيرجع true لما المستخدم يضغط عليه
     bool DrawPresetSwatchButton(Color c)
     {
         Color old = GUI.color;
@@ -722,15 +687,11 @@ public class ControlPanelUI : MonoBehaviour
         }
     }
 
-    // ════════════════════════════════════════════════════════════════
-    //  Compare tab — بيقرأ آخر صورتين محفوظتين (canvas_*.png) من مجلد
-    //  الحفظ نفسه يلي بيستخدمه SaveExperiment() وبيعرضهن جنب بعض.
-    // ════════════════════════════════════════════════════════════════
+    
     Texture2D compareTexOld, compareTexNew;
     string compareNameOld = "", compareNameNew = "";
     bool compareLoadedOnce = false;
 
-    // نفس منطق المجلد الموجود في PBFSolver.SaveExperiment()
     string GetSaveDirectory()
     {
         if (solver != null && !string.IsNullOrEmpty(solver.saveFolder))
@@ -742,7 +703,7 @@ public class ControlPanelUI : MonoBehaviour
     {
         byte[] bytes = System.IO.File.ReadAllBytes(path);
         Texture2D tex = new Texture2D(2, 2);
-        tex.LoadImage(bytes); // بيعيد تحجيم التكستشر تلقائياً حسب الصورة
+        tex.LoadImage(bytes); 
         return tex;
     }
 
@@ -750,7 +711,6 @@ public class ControlPanelUI : MonoBehaviour
     {
         compareLoadedOnce = true;
 
-        // تنظيف الصور القديمة قبل تحميل الجديدة
         if (compareTexOld != null) Destroy(compareTexOld);
         if (compareTexNew != null) Destroy(compareTexNew);
         compareTexOld = compareTexNew = null;
@@ -760,8 +720,7 @@ public class ControlPanelUI : MonoBehaviour
         if (!System.IO.Directory.Exists(dir)) return;
 
         string[] files = System.IO.Directory.GetFiles(dir, "canvas_*.png");
-        // اسم الملف فيه الطابع الزمني yyyyMMdd_HHmmss،
-        // فالترتيب الأبجدي = الترتيب الزمني
+     
         System.Array.Sort(files);
 
         if (files.Length >= 1)
@@ -783,7 +742,6 @@ public class ControlPanelUI : MonoBehaviour
         GUILayout.BeginVertical(sectionBoxStyle);
         DrawSectionHeader("COMPARE EXPERIMENTS");
 
-        // أول مرة بيفتح التبويب منحمّل تلقائياً
         if (!compareLoadedOnce)
             LoadLastTwoExperiments();
 

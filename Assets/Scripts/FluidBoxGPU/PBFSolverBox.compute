@@ -1,73 +1,52 @@
-﻿// ════════════════════════════════════════════════════════════════════
-//  PBFSolver.compute  v1.0
-//  Position Based Fluids على GPU — RTX 2050
-//
-//  المعمارية:
-//  كل pass = kernel منفصل يشتغل على آلاف threads بالتوازي
-//  Pass 0: PredictPositions  — x* = x + v*dt
-//  Pass 1: BuildGrid         — Spatial Hash على GPU
-//  Pass 2: FindNeighbors     — كل جزيء يبحث عن جيرانه
-//  Pass 3: SolveConstraints  — معادلة PBF الأساسية
-//  Pass 4: UpdateVelocity    — v = (x* - x) / dt
-//  Pass 5: EnforceBoundary   — حدود الدلو
-// ════════════════════════════════════════════════════════════════════
+﻿
+RWStructuredBuffer<float3> positions; 
+RWStructuredBuffer<float3> predictedPos; 
+RWStructuredBuffer<float3> velocities;
+RWStructuredBuffer<float3> deltaPos; 
+RWStructuredBuffer<float> lambdas; 
+RWStructuredBuffer<int> states; 
+RWStructuredBuffer<int> neighborList;
+RWStructuredBuffer<int> neighborCount; 
 
-// ── Buffers ──────────────────────────────────────────────────────
-RWStructuredBuffer<float3> positions; // المواقع الحالية
-RWStructuredBuffer<float3> predictedPos; // المواقع المتوقعة x*
-RWStructuredBuffer<float3> velocities; // السرعات
-RWStructuredBuffer<float3> deltaPos; // تصحيح الموقع Δx
-RWStructuredBuffer<float> lambdas; // معامل PBF λ
-RWStructuredBuffer<int> states; // 0=Inside 1=Falling 2=OnCanvas
-RWStructuredBuffer<int> neighborList; // قائمة الجيران
-RWStructuredBuffer<int> neighborCount; // عدد الجيران لكل جزيء
+RWStructuredBuffer<int> gridCount; 
+RWStructuredBuffer<int> gridParticles;
 
-// Spatial Hash Grid
-RWStructuredBuffer<int> gridCount; // عدد الجزيئات في كل خلية
-RWStructuredBuffer<int> gridParticles; // indices الجزيئات في كل خلية
-
-// ── Constants ────────────────────────────────────────────────────
 float dt;
-float h; // نصف قطر التأثير (smoothing length)
-float restDensity; // الكثافة الطبيعية للسائل ρ₀
-float epsilon; // ε لـ CFM (Constraint Force Mixing)
+float h; 
+float restDensity; 
+float epsilon; 
 float bucketInfluence;
-float gravity; // يستخدمها FallingStep بس (حالة سقوط غير مستعملة بهالديمو)
-float3 gravityLocal; // الجاذبية محوّلة لإحداثيات الصندوق المحلية (من C#)
-float3 bucketAccelLocal; // تسارع الصندوق محوّل لإحداثيات محلية (من C#)
+float gravity;
+float3 gravityLocal; 
+float3 bucketAccelLocal;
 
-// Particle sloshing inside bucket — تحريك الجزيئات نفسها داخل الدلو
 int enableParticleSloshing;
-float3 particleSloshVector; // اتجاه*قوة الميلان داخل الدلو
-float particleSloshForce; // دفع جانبي للجزيئات القريبة من السطح
-float particleSloshLiftForce; // رفع/خفض للجزيئات حتى يظهر الميل فعلياً
-float particleSloshSurfaceSlope; // ميل حد السطح الحر
-float particleSloshSurfaceBias; // وزن أكبر للجزيئات القريبة من السطح
+float3 particleSloshVector;
+float particleSloshForce; 
+float particleSloshLiftForce; 
+float particleSloshSurfaceSlope;
+float particleSloshSurfaceBias; 
 
 int particleCount;
-int maxNeighbors; // أقصى عدد جيران لكل جزيء
-float viscosity; // قوة اللزوجة (XSPH)
+int maxNeighbors; 
+float viscosity; 
 
-// Cohesion / Surface tension — تماسك الجزيئات بدون تغيير PBF الأساسي
 int enableParticleCohesion;
 float particleCohesionStrength;
 float particleCohesionRadius;
 float particleCohesionRepulsion;
 float particleCohesionDamping;
 
-// Bucket boundaries
 float3 bucketCenter;
 float3 bucketUp;
 float bucketRadius;
 float bucketTop;
 float bucketBottom;
 
-// ── وضع الديمو: صندوق (متوازي مستطيلات) ──
-float3 bucketRight; // محور X للصندوق
-float3 bucketForward; // محور Z للصندوق
-float3 boxHalfExtents; // أنصاف أبعاد الصندوق (x,y,z)
+float3 bucketRight; 
+float3 bucketForward; 
+float3 boxHalfExtents;
 
-// Spatial Hash Grid dimensions
 int gridSizeX;
 int gridSizeY;
 int gridSizeZ;
@@ -75,10 +54,7 @@ float3 gridOrigin;
 float cellSize;
 int maxPerCell;
 
-// ════════════════════════════════════════════════════════════════════
-//  Poly6 Kernel — لحساب الكثافة
-//  W(r,h) = (315 / 64πh⁹) * (h²-r²)³   إذا r ≤ h
-// ════════════════════════════════════════════════════════════════════
+
 float Poly6(float rSq, float hSq)
 {
     if (rSq >= hSq)
@@ -87,10 +63,7 @@ float Poly6(float rSq, float hSq)
     return 315.0 / (64.0 * 3.14159265 * pow(hSq, 4.5)) * diff * diff * diff;
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Spiky Gradient Kernel — لحساب Δλ
-//  ∇W(r,h) = -45 / (πh⁶) * (h-r)² * r̂   إذا r ≤ h
-// ════════════════════════════════════════════════════════════════════
+
 float3 SpikyGrad(float3 r, float dist, float hVal)
 {
     if (dist >= hVal || dist < 0.0001)
@@ -100,9 +73,7 @@ float3 SpikyGrad(float3 r, float dist, float hVal)
     return coeff * diff * diff * (r / dist);
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Spatial Hash Helpers
-// ════════════════════════════════════════════════════════════════════
+
 int3 GetCell(float3 pos)
 {
     float3 local = pos - gridOrigin;
@@ -124,11 +95,7 @@ int CellIndex(int3 cell)
     return cell.x + cell.y * gridSizeX + cell.z * gridSizeX * gridSizeY;
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Pass 0: PredictPositions
-//  x* = x + v*dt + g*dt²
-//  كل thread = جزيء واحد
-// ════════════════════════════════════════════════════════════════════
+
 #pragma kernel PredictPositions
 
 [numthreads(256, 1, 1)]
@@ -140,11 +107,9 @@ void PredictPositions(uint3 id : SV_DispatchThreadID)
     if (states[i] != 0)
         return; // 0 = INSIDE
 
-    // القوى الخارجية: جاذبية + تأثير حركة الدلو (الاثنين محوّلين مسبقًا لإحداثيات محلية بـ C#)
     float3 grav = gravityLocal;
     float3 bucketF = -bucketAccelLocal * bucketInfluence;
 
-    // تخفيف قوة الدلو إذا زادت عن حد
     float bfMag = length(bucketF);
     if (bfMag > 5.0)
         bucketF = bucketF / bfMag * 5.0;
@@ -162,33 +127,26 @@ void PredictPositions(uint3 id : SV_DispatchThreadID)
             float denom = max(bucketTop - bucketBottom, 0.001);
             float height01 = saturate((vert - bucketBottom) / denom);
 
-            // الجزيئات القريبة من سطح الطلاء تتحرك أكثر؛ الجزيئات السفلية أهدأ.
             float surfaceWeight = lerp(1.0 - particleSloshSurfaceBias, 1.0, smoothstep(0.12, 1.0, height01));
             float3 sloshDir = particleSloshVector / sloshMag;
             float side = 0.0;
             if (bucketRadius > 0.0001)
                 side = clamp(dot(horizVec, sloshDir) / bucketRadius, -1.0, 1.0);
 
-            // دفع جانبي واضح + رفع جهة وخفض الجهة المقابلة حتى تميل الجزيئات نفسها.
             externalForce += particleSloshVector * particleSloshForce * surfaceWeight;
             externalForce += bucketUp * (side * sloshMag * particleSloshLiftForce * surfaceWeight);
 
-            // خلط داخلي خفيف قرب السطح: يجعل السائل يتحرك كموجة لا كطبقة جامدة.
             velocities[i] += sloshDir * (0.45 * sloshMag * surfaceWeight * dt);
         }
     }
 
-    // PBF Prediction: x* = x + (v + f*dt)*dt
     velocities[i] += externalForce * dt;
     predictedPos[i] = positions[i] + velocities[i] * dt;
     deltaPos[i] = float3(0, 0, 0);
     lambdas[i] = 0;
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Pass 1: BuildGrid (ClearGrid + FillGrid)
-//  نبني الـ Spatial Hash Grid من المواقع المتوقعة x*
-// ════════════════════════════════════════════════════════════════════
+
 #pragma kernel ClearGrid
 
 [numthreads(256, 1, 1)]
@@ -217,7 +175,6 @@ void FillGrid(uint3 id : SV_DispatchThreadID)
     if (cellIdx < 0)
         return;
 
-    // InterlockedAdd — atomic operation لتجنب race condition
     int slot;
     InterlockedAdd(gridCount[cellIdx], 1, slot);
 
@@ -225,10 +182,7 @@ void FillGrid(uint3 id : SV_DispatchThreadID)
         gridParticles[cellIdx * maxPerCell + slot] = i;
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Pass 2: FindNeighbors
-//  كل جزيء يبحث في 27 خلية مجاورة عن جيرانه
-// ════════════════════════════════════════════════════════════════════
+
 #pragma kernel FindNeighbors
 
 [numthreads(256, 1, 1)]
@@ -274,19 +228,7 @@ void FindNeighbors(uint3 id : SV_DispatchThreadID)
     neighborCount[i] = nCount;
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Pass 3: SolveConstraints
-//
-//  معادلة PBF الأساسية:
-//
-//  الكثافة:   ρᵢ = Σⱼ W(xᵢ - xⱼ, h)
-//
-//  Constraint: Cᵢ = ρᵢ/ρ₀ - 1 = 0
-//
-//  المضاعف:   λᵢ = -Cᵢ / (Σⱼ|∇Cᵢ|² + ε)
-//
-//  التصحيح:   Δxᵢ = (1/ρ₀) Σⱼ (λᵢ+λⱼ) ∇W(xᵢ-xⱼ,h)
-// ════════════════════════════════════════════════════════════════════
+
 #pragma kernel SolveConstraints
 
 [numthreads(256, 1, 1)]
@@ -303,7 +245,6 @@ void SolveConstraints(uint3 id : SV_DispatchThreadID)
     int cnt = neighborCount[i];
     float hSq = h * h;
 
-    // ── Step 1: حساب الكثافة ρᵢ ────────────────────────────────
     float rho = 0.0;
     for (int k = 0; k < cnt; k++)
     {
@@ -312,13 +253,10 @@ void SolveConstraints(uint3 id : SV_DispatchThreadID)
         float rSq = dot(diff, diff);
         rho += Poly6(rSq, hSq);
     }
-    // أضف تأثير الجزيء على نفسه
     rho += Poly6(0.0, hSq);
 
-    // ── Step 2: Constraint Cᵢ = ρᵢ/ρ₀ - 1 ─────────────────────
     float C = rho / restDensity - 1.0;
 
-    // ── Step 3: مشتق الـ Constraint ∇Cᵢ ────────────────────────
     float3 gradSum = float3(0, 0, 0);
     float gradSumSq = 0.0;
 
@@ -334,14 +272,9 @@ void SolveConstraints(uint3 id : SV_DispatchThreadID)
     }
     gradSumSq += dot(gradSum, gradSum);
 
-    // ── Step 4: المضاعف λᵢ ──────────────────────────────────────
     lambdas[i] = -C / (gradSumSq + epsilon);
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Pass 4: ApplyCorrection
-//  Δxᵢ = (1/ρ₀) Σⱼ (λᵢ+λⱼ) ∇W(xᵢ-xⱼ,h)
-// ════════════════════════════════════════════════════════════════════
 #pragma kernel ApplyCorrection
 
 [numthreads(256, 1, 1)]
@@ -371,11 +304,7 @@ void ApplyCorrection(uint3 id : SV_DispatchThreadID)
     deltaPos[i] = dx;
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Pass 5: UpdateVelocity
-//  x    = x* + Δx
-//  v    = (x - x_old) / dt
-// ════════════════════════════════════════════════════════════════════
+
 #pragma kernel UpdateVelocity
 
 [numthreads(256, 1, 1)]
@@ -387,21 +316,17 @@ void UpdateVelocity(uint3 id : SV_DispatchThreadID)
     if (states[i] != 0)
         return;
 
-    float3 newPos = predictedPos[i]; // التصحيح متطبّق أصلاً (بـ ClampPredictedBox)
+    float3 newPos = predictedPos[i]; 
 
     velocities[i] = (newPos - positions[i]) / max(dt, 0.0001);
     positions[i] = newPos;
 
-    // تقييد السرعة القصوى
     float speed = length(velocities[i]);
     if (speed > 5.0)
         velocities[i] = velocities[i] / speed * 5.0;
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Pass 6: EnforceBoundary
-//  حدود الدلو الأسطواني — تطبق بعد كل iteration
-// ════════════════════════════════════════════════════════════════════
+
 #pragma kernel EnforceBoundary
 
 [numthreads(256, 1, 1)]
@@ -426,12 +351,10 @@ void EnforceBoundary(uint3 id : SV_DispatchThreadID)
         {
             float3 sloshDir = particleSloshVector / sloshMag;
             float side = dot(horizVec, sloshDir) / bucketRadius;
-            // حد السطح الحر يصبح مائلاً: جهة ترتفع وجهة تنخفض، فتظهر حركة الجزيئات عند الجوانب.
             localBucketTop = bucketTop + side * particleSloshSurfaceSlope * sloshMag;
         }
     }
 
-    // تشكيل بصري للجزيئات القريبة من السطح: رفع جهة وخفض الجهة الثانية داخل الدلو.
     if (enableParticleSloshing != 0)
     {
         float sloshMag2 = length(particleSloshVector);
@@ -443,22 +366,20 @@ void EnforceBoundary(uint3 id : SV_DispatchThreadID)
             float height01b = saturate((vert - bucketBottom) / denom2);
             float wTop = smoothstep(0.35, 1.0, height01b);
             float targetOffset = side2 * particleSloshSurfaceSlope * sloshMag2 * wTop;
-            vert += targetOffset * 0.035; // صغير ومباشر حتى لا يسبب انفجاراً عددياً
+            vert += targetOffset * 0.035; 
             horizVec += sloshDir2 * (sloshMag2 * wTop * 0.003);
         }
     }
 
-    // الحد السفلي
     if (vert < bucketBottom)
     {
         vert = bucketBottom;
         positions[i] = bucketCenter + horizVec + bucketUp * vert;
         float vy = dot(velocities[i], bucketUp);
         if (vy < 0)
-            velocities[i] -= bucketUp * vy; // امتصاص كامل، بلا ارتداد (كان *1.5)
+            velocities[i] -= bucketUp * vy; 
     }
 
-    // الحد العلوي — صار مائلاً مع sloshing بدل سقف أفقي ثابت
     if (vert > localBucketTop)
     {
         vert = localBucketTop;
@@ -468,22 +389,17 @@ void EnforceBoundary(uint3 id : SV_DispatchThreadID)
             velocities[i] -= bucketUp * vy;
     }
 
-    // الحد الجانبي
     if (horizDist > bucketRadius && horizDist > 0.001)
     {
         float3 radDir = horizVec / horizDist;
         positions[i] = bucketCenter + radDir * bucketRadius + bucketUp * vert;
         float vRad = dot(velocities[i], radDir);
         if (vRad > 0)
-            velocities[i] -= radDir * vRad; // امتصاص كامل، بلا ارتداد (كان *1.2)
+            velocities[i] -= radDir * vRad;
     }
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  ClampPredictedBox — يقصّ predictedPos على حدود الصندوق فقط (بلا سرعة)
-//  نفس فكرة ClampToBox بـ FluidBox.cs — بينشغّل بعد كل iteration من حل
-//  الـ PBF، مش مرة وحدة بآخر الفريم متل EnforceBoundaryBox.
-// ════════════════════════════════════════════════════════════════════
+
 #pragma kernel ClampPredictedBox
 
 [numthreads(256, 1, 1)]
@@ -495,12 +411,11 @@ void ClampPredictedBox(uint3 id : SV_DispatchThreadID)
     if (states[i] != 0)
         return;
 
-    // طبّق تصحيح الـ iteration الحالية على predictedPos (كانت هاي الخطوة الناقصة —
-    // بدونها كل iteration كانت تحسب من نفس الموقع الأصلي غير المصحَّح).
+
     predictedPos[i] += deltaPos[i];
     deltaPos[i] = float3(0, 0, 0);
 
-    // إحداثيات محلية جاهزة — قصّ مباشر بلا أي تحويل (بلا دوران الصندوق يأثّر هون)
+  
     float3 p = predictedPos[i];
     p.x = clamp(p.x, -boxHalfExtents.x, boxHalfExtents.x);
     p.y = clamp(p.y, -boxHalfExtents.y, boxHalfExtents.y);
@@ -508,11 +423,7 @@ void ClampPredictedBox(uint3 id : SV_DispatchThreadID)
     predictedPos[i] = p;
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Pass 6ب: EnforceBoundaryBox — حدود متوازي مستطيلات (وضع الديمو)
-//  نفس معالجة السائل تمامًا؛ فقط الجدران تصير مستطيلة بدل دائرية.
-//  يقصّ الجزيء على AABB في إطار الصندوق (bucketRight/Up/Forward).
-// ════════════════════════════════════════════════════════════════════
+
 #pragma kernel EnforceBoundaryBox
 
 [numthreads(256, 1, 1)]
@@ -527,7 +438,6 @@ void EnforceBoundaryBox(uint3 id : SV_DispatchThreadID)
     float3 p = positions[i];
     float3 v = velocities[i];
 
-    // إحداثيات محلية جاهزة — قصّ مباشر على كل محور + امتصاص كامل للسرعة (بلا ارتداد)
     if (p.x < -boxHalfExtents.x)
     {
         p.x = -boxHalfExtents.x;
@@ -571,10 +481,7 @@ void EnforceBoundaryBox(uint3 id : SV_DispatchThreadID)
     velocities[i] = v;
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Pass 7: FallingStep
-//  الجزيئات الساقطة — سقوط حر بسيط على GPU
-// ════════════════════════════════════════════════════════════════════
+
 #pragma kernel FallingStep
 
 [numthreads(256, 1, 1)]
@@ -590,10 +497,7 @@ void FallingStep(uint3 id : SV_DispatchThreadID)
     velocities[i] *= 0.995;
     positions[i] += velocities[i] * dt;
 }
-// ════════════════════════════════════════════════════════════════════
-//  Pass: ApplyViscosity (XSPH) — السائل اللزج يتحرك ككتلة متماسكة
-//  كل جزيء داخلي يأخذ جزءًا من متوسط سرعة جيرانه (يُشغّل بعد UpdateVelocity)
-// ════════════════════════════════════════════════════════════════════
+
 #pragma kernel ApplyViscosity
 
 [numthreads(256, 1, 1)]
@@ -603,7 +507,7 @@ void ApplyViscosity(uint3 id : SV_DispatchThreadID)
     if (i >= particleCount)
         return;
     if (states[i] != 0)
-        return; // داخل الدلو فقط
+        return;
 
     int baseIdx = i * maxNeighbors;
     int cnt = neighborCount[i];
@@ -630,11 +534,7 @@ void ApplyViscosity(uint3 id : SV_DispatchThreadID)
         velocities[i] += viscosity * (vSmooth / wSum);
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  Pass: ApplyCohesion — Surface Tension / Cohesion
-//  يجذب الجزيئات القريبة لبعضها بشكل خفيف حتى يظهر الطلاء ككتلة سائلة.
-//  لا يغير خوارزمية PBF الأساسية؛ هو force إضافي بعد اللزوجة.
-// ════════════════════════════════════════════════════════════════════
+
 #pragma kernel ApplyCohesion
 
 [numthreads(256, 1, 1)]
@@ -644,7 +544,7 @@ void ApplyCohesion(uint3 id : SV_DispatchThreadID)
     if (i >= particleCount)
         return;
     if (states[i] != 0)
-        return; // داخل الدلو فقط
+        return; 
     if (enableParticleCohesion == 0 || particleCohesionStrength <= 0.0)
         return;
 
@@ -674,7 +574,6 @@ void ApplyCohesion(uint3 id : SV_DispatchThreadID)
         float r = sqrt(rSq);
         float3 dir = d / r;
 
-        // وزن أعلى للجيران القريبين من حافة مدى التأثير، يعطي شعور شدّ سطحي بدل تكتل حاد.
         float q = saturate(r / radius);
         float w = (1.0 - q);
         w = w * w;
@@ -682,7 +581,6 @@ void ApplyCohesion(uint3 id : SV_DispatchThreadID)
         cohesionDir += dir * w;
         totalW += w;
 
-        // منع التراكم الزائد عندما تصير الجزيئات قريبة جداً.
         if (r < minDist)
         {
             float push = (1.0 - r / minDist);

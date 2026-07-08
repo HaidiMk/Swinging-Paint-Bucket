@@ -1,16 +1,12 @@
 ﻿using UnityEngine;
 
-// ════════════════════════════════════════════════════════════════════
-//  BucketHole.cs  v3.0
-//  تعديل عن v2.0: يتكلم مع PBFSolver بدل PaintSimulation
-//  باقي المنطق (Torricelli، spillAngle، velocityBoost) نفسه
-// ════════════════════════════════════════════════════════════════════
+
 
 public class BucketHole : MonoBehaviour
 {
     [Header("References")]
     public SphericalPendulum pendulum;
-    public PBFSolver paintSim;   // ← PBFSolver بدل PaintSimulation
+    public PBFSolver paintSim;   
 
     [Header("Hole Settings — إعدادات الفتحة")]
     [Range(0.005f, 0.05f)]
@@ -69,7 +65,6 @@ public class BucketHole : MonoBehaviour
         float bucketSpeed = pendulum.GetBucketVelocity().magnitude;
         float velBoost = 1f + bucketSpeed * velocityBoostFactor;
 
-        // ── Torricelli ────────────────────────────────────────────
         float torricelliFactor = 1f;
         float fillRatio = 1f;
 
@@ -95,7 +90,6 @@ public class BucketHole : MonoBehaviour
             }
         }
 
-        // ── 1) خروج من الفتحة ─────────────────────────────────────
         if (tiltDeg > spillAngleThreshold)
         {
             float spillFactor = Mathf.InverseLerp(spillAngleThreshold, 90f, tiltDeg);
@@ -103,7 +97,6 @@ public class BucketHole : MonoBehaviour
             float baseArea = Mathf.PI * (0.02f / 2f) * (0.02f / 2f);
             float areaFactor = holeArea / baseArea;
 
-            // اللزوجة: الدهان اللزج يصبّ أبطأ بكتير من الفتحة (مضخّم)
             float viscFlow = Mathf.Lerp(1.2f, 0.15f, Mathf.Clamp01(paintSim.viscosity));
             float rate = particlesPerSecond * spillFactor * areaFactor * velBoost * torricelliFactor * viscFlow;
             spawnTimer += rate * dt;
@@ -130,7 +123,6 @@ public class BucketHole : MonoBehaviour
             if (enableTrail) paintSim.BreakTrail();
         }
 
-        // ── 2) Overflow من الأعلى ──────────────────────────────────
         if (tiltDeg > overflowAngleThreshold)
         {
             float overflowFactor = Mathf.InverseLerp(overflowAngleThreshold, 150f, tiltDeg);

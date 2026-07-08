@@ -1,40 +1,27 @@
-﻿// PBFSolver.compute v1.0
-// Position Based Fluids GPU RTX 2050
-// pass = kernel threads
-// Pass 0: PredictPositions x* = x + v*dt
-// Pass 1: BuildGrid Spatial Hash GPU
-// Pass 2: FindNeighbors
-// Pass 3: SolveConstraints PBF
-// Pass 4: UpdateVelocity v = (x* - x) / dt
-// Pass 5: EnforceBoundary
-
-// Buffers
+﻿
 RWStructuredBuffer<float3> positions;
-RWStructuredBuffer<float3> predictedPos; // x*
+RWStructuredBuffer<float3> predictedPos; 
 RWStructuredBuffer<float3> velocities;
-RWStructuredBuffer<float3> deltaPos; // x
-RWStructuredBuffer<float> lambdas; // PBF
-RWStructuredBuffer<int> states; // 0=Inside 1=Falling 2=OnCanvas
+RWStructuredBuffer<float3> deltaPos;
+RWStructuredBuffer<float> lambdas;
+RWStructuredBuffer<int> states; 
 RWStructuredBuffer<int> neighborList;
 RWStructuredBuffer<int> neighborCount;
 
-// Spatial Hash Grid
 RWStructuredBuffer<int> gridCount;
-RWStructuredBuffer<int> gridParticles; // indices
+RWStructuredBuffer<int> gridParticles; 
 
-// Constants
 float dt;
-float h; // (smoothing length)
+float h; 
 float restDensity;
-float epsilon; // CFM (Constraint Force Mixing)
+float epsilon; 
 float gravity;
 float gravityScale;
 float bucketInfluence;
-float3 bucketAccel; // world/debug compatibility only
-float3 gravityLocal; // inside particles use bucket-fluid-local space
-float3 bucketAccelLocal; // local pseudo acceleration of bucket
+float3 bucketAccel;
+float3 gravityLocal; 
+float3 bucketAccelLocal; 
 
-// Particle sloshing inside bucket
 int enableParticleSloshing;
 float3 particleSloshVector;
 float particleSloshForce;
@@ -44,29 +31,25 @@ float particleSloshSurfaceBias;
 
 int particleCount;
 int maxNeighbors;
-float viscosity; // (XSPH)
+float viscosity; 
 
-// Cohesion / Surface tension PBF
 int enableParticleCohesion;
 float particleCohesionStrength;
 float particleCohesionRadius;
 float particleCohesionRepulsion;
 float particleCohesionDamping;
 
-// Settling / anti-boiling
 float insideVelocityDamping;
 float stillSettleDamping;
 float velocitySleepThreshold;
 float bucketMotionAmount;
 
-// Bucket boundaries
 float3 bucketCenter;
 float3 bucketUp;
 float bucketRadius;
 float bucketTop;
 float bucketBottom;
 
-// Spatial Hash Grid dimensions
 int gridSizeX;
 int gridSizeY;
 int gridSizeZ;
@@ -74,8 +57,7 @@ float3 gridOrigin;
 float cellSize;
 int maxPerCell;
 
-// Poly6 Kernel
-// W(r,h) = (315 / 64h) * (h-r) r h
+
 float Poly6(float rSq, float hSq)
 {
     if (rSq >= hSq)
@@ -84,8 +66,7 @@ float Poly6(float rSq, float hSq)
     return 315.0 / (64.0 * 3.14159265 * pow(hSq, 4.5)) * diff * diff * diff;
 }
 
-// Spiky Gradient Kernel
-// W(r,h) = -45 / (h) * (h-r) * r r h
+
 float3 SpikyGrad(float3 r, float dist, float hVal)
 {
     if (dist >= hVal || dist < 0.0001)
@@ -95,7 +76,6 @@ float3 SpikyGrad(float3 r, float dist, float hVal)
     return coeff * diff * diff * (r / dist);
 }
 
-// Spatial Hash Helpers
 int3 GetCell(float3 pos)
 {
     float3 local = pos - gridOrigin;
@@ -117,9 +97,7 @@ int CellIndex(int3 cell)
     return cell.x + cell.y * gridSizeX + cell.z * gridSizeX * gridSizeY;
 }
 
-// Pass 0: PredictPositions
-// x* = x + v*dt + g*dt
-// thread =
+
 #pragma kernel PredictPositions
 
 [numthreads(256, 1, 1)]
@@ -129,10 +107,9 @@ void PredictPositions(uint3 id : SV_DispatchThreadID)
     if (i >= particleCount)
         return;
     if (states[i] != 0)
-        return; // 0 = INSIDE
+        return; 
 
-    // INSIDE particles are stored in bucket-fluid-local coordinates:
-    // x/z = cylinder radius, y = bucket vertical axis.
+   
     float3 bucketF = -bucketAccelLocal * bucketInfluence;
 
     float bfMag = length(bucketF);
@@ -154,8 +131,7 @@ void PredictPositions(uint3 id : SV_DispatchThreadID)
             float denom = max(bucketTop - bucketBottom, 0.001);
             float height01 = saturate((vert - bucketBottom) / denom);
 
-            // فقط الجزيئات القريبة من السطح تأخذ drive واضح.
-            // الأهم: نربطه بـ bucketMotionAmount حتى عند التوقف لا يبقى حقن طاقة.
+           
             float surfaceWeight = lerp(1.0 - particleSloshSurfaceBias, 1.0, smoothstep(0.18, 1.0, height01));
             surfaceWeight *= bucketMotionAmount;
 
@@ -166,12 +142,10 @@ void PredictPositions(uint3 id : SV_DispatchThreadID)
 
             externalForce += sloshVec * particleSloshForce * surfaceWeight;
 
-            // رفع خفيف جداً فقط وقت الحركة. الرفع القوي كان سبب شكل الغاز/الغليان.
             externalForce += float3(0, 1, 0) * (side * sloshMag * particleSloshLiftForce * surfaceWeight * 0.18);
         }
     }
 
-// PBF Prediction: x* = x + (v + f*dt)*dt
     v += externalForce * dt;
     velocities[i] = v;
     predictedPos[i] = positions[i] + v * dt;
@@ -179,8 +153,7 @@ void PredictPositions(uint3 id : SV_DispatchThreadID)
     lambdas[i] = 0;
 }
 
-// Pass 1: BuildGrid (ClearGrid + FillGrid)
-// Spatial Hash Grid x*
+
 #pragma kernel ClearGrid
 
 [numthreads(256, 1, 1)]
@@ -209,7 +182,6 @@ void FillGrid(uint3 id : SV_DispatchThreadID)
     if (cellIdx < 0)
         return;
 
-// InterlockedAdd atomic operation race condition
     int slot;
     InterlockedAdd(gridCount[cellIdx], 1, slot);
 
@@ -217,8 +189,7 @@ void FillGrid(uint3 id : SV_DispatchThreadID)
         gridParticles[cellIdx * maxPerCell + slot] = i;
 }
 
-// Pass 2: FindNeighbors
-// 27
+
 #pragma kernel FindNeighbors
 
 [numthreads(256, 1, 1)]
@@ -245,8 +216,7 @@ void FindNeighbors(uint3 id : SV_DispatchThreadID)
                 if (cellIdx < 0)
                     continue;
 
-                // مهم: gridCount قد يصبح أكبر من maxPerCell عند عدد جزيئات كبير.
-                // FillGrid يخزن فقط أول maxPerCell؛ لذلك ممنوع قراءة أكثر من هذا الحد.
+           
                 int count = min(gridCount[cellIdx], maxPerCell);
                 for (int k = 0; k < count && nCount < maxNeighbors; k++)
                 {
@@ -266,12 +236,7 @@ void FindNeighbors(uint3 id : SV_DispatchThreadID)
     neighborCount[i] = nCount;
 }
 
-// Pass 3: SolveConstraints
-// PBF :
-// : = W(x - x, h)
-// Constraint: C = / - 1 = 0
-// : = -C / (|C| + )
-// : x = (1/) (+) W(x-x,h)
+
 #pragma kernel SolveConstraints
 
 [numthreads(256, 1, 1)]
@@ -288,7 +253,6 @@ void SolveConstraints(uint3 id : SV_DispatchThreadID)
     int cnt = neighborCount[i];
     float hSq = h * h;
 
-// Step 1:
     float rho = 0.0;
     for (int k = 0; k < cnt; k++)
     {
@@ -299,10 +263,8 @@ void SolveConstraints(uint3 id : SV_DispatchThreadID)
     }
     rho += Poly6(0.0, hSq);
 
-// Step 2: Constraint C = / - 1
     float C = rho / restDensity - 1.0;
 
-// Step 3: Constraint C
     float3 gradSum = float3(0, 0, 0);
     float gradSumSq = 0.0;
 
@@ -318,13 +280,10 @@ void SolveConstraints(uint3 id : SV_DispatchThreadID)
     }
     gradSumSq += dot(gradSum, gradSum);
 
-// Step 4:
     lambdas[i] = -C / (gradSumSq + epsilon);
 }
 
-// ClampPredicted predictedPos
-// . PredictPositions (
-// grid) iteration ClampToBox FluidBox.cs.
+
 #pragma kernel ClampPredicted
 
 [numthreads(256, 1, 1)]
@@ -336,10 +295,9 @@ void ClampPredicted(uint3 id : SV_DispatchThreadID)
     if (states[i] != 0)
         return;
 
-// iteration ( )
     float3 dp = deltaPos[i];
     float dpLen = length(dp);
-    float maxCorrection = h * 0.5; // ما تسمح لتصحيح واحد يحرك الجزيء أكتر من نص h
+    float maxCorrection = h * 0.5; 
     if (dpLen > maxCorrection)
         dp = dp / dpLen * maxCorrection;
     predictedPos[i] += dp;
@@ -356,8 +314,7 @@ void ClampPredicted(uint3 id : SV_DispatchThreadID)
     predictedPos[i] = float3(xz.x, vert, xz.y);
 }
 
-// Pass 4: ApplyCorrection
-// x = (1/) (+) W(x-x,h)
+
 #pragma kernel ApplyCorrection
 
 [numthreads(256, 1, 1)]
@@ -387,9 +344,7 @@ void ApplyCorrection(uint3 id : SV_DispatchThreadID)
     deltaPos[i] = dx;
 }
 
-// Pass 5: UpdateVelocity
-// x = x* + x
-// v = (x - x_old) / dt
+
 #pragma kernel UpdateVelocity
 
 [numthreads(256, 1, 1)]
@@ -401,7 +356,7 @@ void UpdateVelocity(uint3 id : SV_DispatchThreadID)
     if (states[i] != 0)
         return;
 
-    float3 newPos = predictedPos[i]; // ( ClampPredicted)
+    float3 newPos = predictedPos[i]; 
 
     velocities[i] = (newPos - positions[i]) / max(dt, 0.0001);
     positions[i] = newPos;
@@ -411,8 +366,7 @@ void UpdateVelocity(uint3 id : SV_DispatchThreadID)
         velocities[i] = velocities[i] / speed * 5.0;
 }
 
-// Pass 6: EnforceBoundary
-// iteration
+
 #pragma kernel EnforceBoundary
 
 [numthreads(256, 1, 1)]
@@ -445,7 +399,6 @@ void EnforceBoundary(uint3 id : SV_DispatchThreadID)
         float height01b = saturate((vert - bucketBottom) / denom2);
         float wTop = smoothstep(0.45, 1.0, height01b) * motion;
 
-        // لا ندفع الجزيئات للأعلى باستمرار. فقط إزاحة جانبية صغيرة عند الحركة.
         xz += sloshDir * (sloshMag * wTop * 0.0012);
         horizDist = length(xz);
     }
@@ -482,8 +435,7 @@ void EnforceBoundary(uint3 id : SV_DispatchThreadID)
 }
 
 
-// Pass 6: DampInsideFluid
-// Anti-boiling: remove numerical energy after constraints/boundaries.
+
 #pragma kernel DampInsideFluid
 
 [numthreads(256, 1, 1)]
@@ -500,7 +452,6 @@ void DampInsideFluid(uint3 id : SV_DispatchThreadID)
     float damping = insideVelocityDamping + stillSettleDamping * still;
     v *= exp(-damping * dt);
 
-    // إذا الجزيئة ملتصقة بالقاع أو الجدار، لا نسمح للمركبة الخارجة أن ترتد رقمياً للأبد.
     float3 p = positions[i];
     if (p.y <= bucketBottom + h * 0.12 && v.y < 0.0)
         v.y = 0.0;
@@ -525,8 +476,7 @@ void DampInsideFluid(uint3 id : SV_DispatchThreadID)
     velocities[i] = v;
 }
 
-// Pass 7: FallingStep
-// GPU
+
 #pragma kernel FallingStep
 
 [numthreads(256, 1, 1)]
@@ -536,7 +486,7 @@ void FallingStep(uint3 id : SV_DispatchThreadID)
     if (i >= particleCount)
         return;
     if (states[i] != 1)
-        return; // 1 = FALLING
+        return; 
 
     float3 v = velocities[i];
     v.y -= gravity * dt;
@@ -544,8 +494,7 @@ void FallingStep(uint3 id : SV_DispatchThreadID)
     velocities[i] = v;
     positions[i] += v * dt;
 }
-// Pass: ApplyViscosity (XSPH)
-// ( UpdateVelocity)
+
 #pragma kernel ApplyViscosity
 
 [numthreads(256, 1, 1)]
@@ -585,8 +534,7 @@ void ApplyViscosity(uint3 id : SV_DispatchThreadID)
     }
 }
 
-// Pass: ApplyCohesion Surface Tension / Cohesion
-// PBF force .
+
 #pragma kernel ApplyCohesion
 
 [numthreads(256, 1, 1)]
@@ -646,7 +594,7 @@ void ApplyCohesion(uint3 id : SV_DispatchThreadID)
     {
         float3 force = (cohesionDir / totalW) * particleCohesionStrength;
         if (repelCount > 0.0)
-            force += (repelDir / repelCount) * particleCohesionRepulsion; // متوسّط بدل مجموع خام — ما عاد يكبر مع عدد الجيران
+            force += (repelDir / repelCount) * particleCohesionRepulsion; 
 
         float3 v = velocities[i];
         v += force * dt;
@@ -654,12 +602,6 @@ void ApplyCohesion(uint3 id : SV_DispatchThreadID)
         velocities[i] = v;
     }
 
-    // Sleep threshold: cohesion + repulsion keep fighting near the walls
-    // (boundary clamping pushes particles closer than ideal spacing), so a
-    // tiny numerical jitter never fully dies out there — this was the cause
-    // of the endless "boiling" look along the container walls.
-    // If the remaining velocity is tiny, snap it to zero instead of letting
-    // it linger forever.
-    if (dot(velocities[i], velocities[i]) < 0.0004) // ~0.02 m/s
+    if (dot(velocities[i], velocities[i]) < 0.0004) 
         velocities[i] = float3(0, 0, 0);
 }
